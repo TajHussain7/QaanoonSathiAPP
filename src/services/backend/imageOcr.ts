@@ -7,7 +7,7 @@
  */
 
 import { HfInference } from "@huggingface/inference";
-import * as Tesseract from "tesseract.js";
+import Tesseract from "tesseract.js";
 
 export interface OCRResult {
   text: string;
@@ -85,16 +85,21 @@ export async function extractTextFromImageHF(
 /**
  * Extract text from image using Tesseract.js (local, CPU-based OCR)
  * More reliable for diverse text, works offline, but slower
+ * Uses Tesseract.js v7 worker-based API
  * @param imageBuffer Buffer or Uint8Array of image file
- * @param language 'ur' for Urdu, 'en' for English, 'urd+eng' for both
- * @returns Extracted text
+ * @param language 'ur' for Urdu, 'en' for English
+ * @returns Extracted text and confidence
  */
 export async function extractTextFromImageTesseract(
   imageBuffer: Buffer | Uint8Array,
   language: "ur" | "en" = "en",
 ): Promise<OCRResult> {
+  let worker: any = null;
+
   try {
-    console.log(`🔤 Extracting text from image (Tesseract, local OCR)...`);
+    console.log(
+      `🔤 Extracting text from image (Tesseract.js v7, local OCR)...`,
+    );
 
     // Map language codes to Tesseract language codes
     const langMap: Record<string, string> = {
@@ -110,24 +115,75 @@ export async function extractTextFromImageTesseract(
       : Buffer.from(imageBuffer).toString("base64");
     const imageSrc = `data:image/png;base64,${base64}`;
 
-    // Perform OCR using Tesseract.js
-    const result = await Tesseract.recognize(imageSrc, tesseractLang);
+    // Create Tesseract worker (v7 API - try createWorker first)
+    console.log(
+      `   Creating Tesseract worker for language: ${tesseractLang}...`,
+    );
+
+    // Try the createWorker API (v7 standard)
+    let createWorkerFn: any;
+    if (typeof (Tesseract as any).createWorker === "function") {
+      createWorkerFn = (Tesseract as any).createWorker;
+    } else if (typeof (Tesseract as any).default?.createWorker === "function") {
+      createWorkerFn = (Tesseract as any).default.createWorker;
+    } else if (typeof (Tesseract as any).create === "function") {
+      createWorkerFn = (Tesseract as any).create;
+    } else {
+      throw new Error(
+        "Tesseract.js API not found. Expected createWorker() or create() function.",
+      );
+    }
+
+    worker = await createWorkerFn();
+
+    // Load and initialize language
+    console.log(`   Loading language: ${tesseractLang}...`);
+    await worker.loadLanguage(tesseractLang);
+    await worker.initialize(tesseractLang);
+
+    // Perform OCR
+    console.log(`   Recognizing text...`);
+    const result = await worker.recognize(imageSrc);
     const text = result.data.text;
+    const confidence = result.data.confidence || 85; // Confidence from 0-100
 
     console.log(
-      `✅ Tesseract OCR complete: ${text.length} chars, confidence: ${result.data.confidence.toFixed(2)}%`,
+      `✅ Tesseract OCR complete: ${text.length} chars, confidence: ${confidence.toFixed(0)}%`,
     );
+
+    // Clean up worker
+    await worker.terminate();
+    worker = null;
 
     return {
       text: text.trim(),
       language: language,
-      confidence: result.data.confidence / 100,
+      confidence: confidence / 100, // Convert to 0-1 range
       method: "tesseract",
     };
   } catch (error: any) {
+    // Clean up worker on error
+    if (worker) {
+      try {
+        await worker.terminate();
+      } catch (e) {
+        console.warn("Error terminating Tesseract worker:", e);
+      }
+    }
+
     const errorMsg = error.message || String(error);
     console.error(`❌ Tesseract OCR failed: ${errorMsg.slice(0, 100)}`);
-    throw new Error(`Image OCR failed: ${errorMsg}`);
+
+    // Provide detailed error information
+    if (errorMsg.includes("ENOSPC") || errorMsg.includes("out of memory")) {
+      throw new Error(
+        "Insufficient memory for OCR. Please try a smaller image.",
+      );
+    } else if (errorMsg.includes("timeout")) {
+      throw new Error("OCR processing timed out. Please try a simpler image.");
+    } else {
+      throw new Error(`Image OCR failed: ${errorMsg}`);
+    }
   }
 }
 
