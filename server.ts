@@ -9,6 +9,56 @@ import dotenv from "dotenv";
 // Load environment variables
 dotenv.config();
 
+// ===== CRITICAL FIX: DOMMatrix Polyfill for Node.js =====
+// pdf.js and other libraries require DOMMatrix which is a browser API
+// This polyfill prevents "DOMMatrix is not defined" errors
+if (typeof globalThis.DOMMatrix === "undefined") {
+  (globalThis as any).DOMMatrix = class DOMMatrix {
+    public a: number;
+    public b: number;
+    public c: number;
+    public d: number;
+    public e: number;
+    public f: number;
+
+    constructor(
+      a: number = 1,
+      b: number = 0,
+      c: number = 0,
+      d: number = 1,
+      e: number = 0,
+      f: number = 0,
+    ) {
+      this.a = a;
+      this.b = b;
+      this.c = c;
+      this.d = d;
+      this.e = e;
+      this.f = f;
+    }
+
+    get m11(): number {
+      return this.a;
+    }
+    get m12(): number {
+      return this.b;
+    }
+    get m21(): number {
+      return this.c;
+    }
+    get m22(): number {
+      return this.d;
+    }
+    get m41(): number {
+      return this.e;
+    }
+    get m42(): number {
+      return this.f;
+    }
+  };
+}
+// ============================================================
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -274,10 +324,28 @@ async function startServer() {
   app.post("/api/extract-text", upload.single("file"), async (req, res) => {
     try {
       if (!req.file) {
-        return res.status(400).json({ error: "No file provided" });
+        return res.status(400).json({
+          error: "No file provided",
+          message: "Please upload a file (PDF, Image, or Audio)",
+        });
       }
 
       const language = req.body.language || "en"; // 'ur' or 'en'
+      const supportedTypes = [
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+      ];
+
+      if (!supportedTypes.includes(req.file.mimetype)) {
+        return res.status(400).json({
+          error: "Unsupported file type",
+          message: `File type "${req.file.mimetype}" is not supported. Please use: PDF, JPG, PNG, WebP, or GIF`,
+          supportedTypes,
+        });
+      }
 
       const { extractTextFromMedia, validateExtractionResult } = await import(
         resolveModule("src/services/backend/mediaExtractor.js")
@@ -295,6 +363,16 @@ async function startServer() {
         return res.status(400).json({
           error: validation.message,
           mediaType: result.mediaType,
+          message: "Failed to extract text from file. Please try another file.",
+        });
+      }
+
+      if (!result.text || result.text.trim().length === 0) {
+        return res.status(400).json({
+          error: "No text found",
+          message:
+            "The file appears to be empty or could not be processed. Please check the file and try again.",
+          mediaType: result.mediaType,
         });
       }
 
@@ -309,12 +387,21 @@ async function startServer() {
         confidence: result.confidence,
         method: result.method,
         metadata: result.metadata,
-        message: validation.message,
+        message: validation.message || "Text extracted successfully",
       });
     } catch (error: any) {
       console.error("Text extraction error:", error);
+      const errorMessage = error.message || "Failed to process file";
+      console.error("Full error details:", error);
+
       res.status(500).json({
-        error: error.message || "File text extraction failed",
+        error: errorMessage,
+        message:
+          "An error occurred while processing your file. Please try again.",
+        details:
+          process.env.NODE_ENV === "development"
+            ? error.stack
+            : "Contact support if this persists",
       });
     }
   });

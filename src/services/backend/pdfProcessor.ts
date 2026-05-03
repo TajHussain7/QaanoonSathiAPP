@@ -10,6 +10,28 @@
 import * as pdfjsLib from "pdfjs-dist";
 import { extractTextFromImage } from "./imageOcr.js";
 
+// Initialize PDF.js worker
+const initPDFWorker = () => {
+  try {
+    // Set the worker source for pdf.js
+    const workerPath = new URL(
+      "../../../node_modules/pdfjs-dist/build/pdf.worker.mjs",
+      import.meta.url,
+    ).href;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerPath;
+    console.log("✅ PDF.js worker initialized successfully");
+  } catch (error: any) {
+    console.warn(
+      "⚠️ Could not initialize PDF.js worker from standard location:",
+      error.message,
+    );
+    // Continue anyway - pdf.js can sometimes work without explicit worker setup
+  }
+};
+
+// Initialize on module load
+initPDFWorker();
+
 export interface PDFExtractionResult {
   text: string;
   pageCount: number;

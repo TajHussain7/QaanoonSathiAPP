@@ -124,3 +124,46 @@ body {
 .markdown-body code {
   @apply px-2 py-1 bg-[#2C2621]/5 rounded font-mono text-sm;
 }
+
+/* Enhanced RTL and Urdu Text Support */
+.rtl {
+  direction: rtl;
+  text-align: right;
+}
+
+.urdu-text {
+  font-family: "Noto Nastaliq Urdu", "Segoe UI", sans-serif;
+  direction: rtl;
+  text-align: right;
+  line-height: 2;
+  font-size: 1.1rem;
+  word-spacing: 0.1em;
+  letter-spacing: 0.05em;
+}
+
+/* Markdown body for Urdu content */
+.markdown-body.urdu {
+  direction: rtl;
+  text-align: right;
+  font-family: "Noto Nastaliq Urdu", "Segoe UI", sans-serif;
+}
+
+.markdown-body.urdu strong,
+.markdown-body.urdu b {
+  font-weight: 700;
+  font-family: "Noto Nastaliq Urdu", "Segoe UI", sans-serif;
+}
+
+.markdown-body.urdu ul,
+.markdown-body.urdu ol {
+  margin-right: 1.5rem;
+  margin-left: auto;
+}
+
+.markdown-body.urdu blockquote {
+  border-right: 4px solid #a68a56;
+  border-left: none;
+  padding-right: 1.5rem;
+  padding-left: 0;
+  text-align: right;
+}

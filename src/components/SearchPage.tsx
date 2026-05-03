@@ -327,19 +327,103 @@ const SearchPage: React.FC<SearchPageProps> = ({
             </div>
 
             <div
-              className={`relative z-10 leading-[1.8] text-[#065016] ${lastResultLang === "ur" ? "text-right font-urdu text-3xl" : "text-xl font-serif italic text-left"}`}
+              className={`relative z-10 leading-[1.8] text-[#065016] ${lastResultLang === "ur" ? "text-right font-urdu text-2xl md:text-3xl" : "text-lg md:text-xl font-serif italic text-left"}`}
+              dir={lastResultLang === "ur" ? "rtl" : "ltr"}
             >
-              <div className="markdown-body">
-                <ReactMarkdown>{answer}</ReactMarkdown>
+              <div
+                className={`markdown-body ${lastResultLang === "ur" ? "urdu" : ""}`}
+              >
+                <ReactMarkdown
+                  components={{
+                    strong: ({ children }) => (
+                      <strong className="font-black text-[#065016]">
+                        {children}
+                      </strong>
+                    ),
+                    b: ({ children }) => (
+                      <strong className="font-black text-[#065016]">
+                        {children}
+                      </strong>
+                    ),
+                    em: ({ children }) => (
+                      <em
+                        className={`italic ${lastResultLang === "ur" ? "font-semibold" : ""}`}
+                      >
+                        {children}
+                      </em>
+                    ),
+                    i: ({ children }) => (
+                      <i
+                        className={`italic ${lastResultLang === "ur" ? "font-semibold" : ""}`}
+                      >
+                        {children}
+                      </i>
+                    ),
+                    p: ({ children }) => (
+                      <p
+                        className={`mb-4 leading-[1.8] ${lastResultLang === "ur" ? "text-right" : ""}`}
+                      >
+                        {children}
+                      </p>
+                    ),
+                    li: ({ children }) => (
+                      <li
+                        className={`mb-2 leading-relaxed ${lastResultLang === "ur" ? "text-right" : ""}`}
+                      >
+                        {children}
+                      </li>
+                    ),
+                    ul: ({ children }) => (
+                      <ul
+                        className={`list-disc mb-6 space-y-2 ${lastResultLang === "ur" ? "text-right ml-4 mr-0" : "ml-6"}`}
+                      >
+                        {children}
+                      </ul>
+                    ),
+                    ol: ({ children }) => (
+                      <ol
+                        className={`list-decimal mb-6 space-y-2 ${lastResultLang === "ur" ? "text-right ml-4 mr-0" : "ml-6"}`}
+                      >
+                        {children}
+                      </ol>
+                    ),
+                    h1: ({ children }) => (
+                      <h1
+                        className={`text-3xl md:text-4xl font-black mb-6 mt-8 text-[#065016] ${lastResultLang === "ur" ? "text-right" : ""}`}
+                      >
+                        {children}
+                      </h1>
+                    ),
+                    h2: ({ children }) => (
+                      <h2
+                        className={`text-2xl md:text-3xl font-black mb-4 mt-6 text-[#065016] ${lastResultLang === "ur" ? "text-right" : ""}`}
+                      >
+                        {children}
+                      </h2>
+                    ),
+                    h3: ({ children }) => (
+                      <h3
+                        className={`text-xl md:text-2xl font-black mb-3 mt-4 text-[#065016] ${lastResultLang === "ur" ? "text-right" : ""}`}
+                      >
+                        {children}
+                      </h3>
+                    ),
+                  }}
+                >
+                  {answer}
+                </ReactMarkdown>
               </div>
             </div>
 
-            <div className="mt-16 pt-10 border-t border-[#065016]/5 flex flex-wrap gap-3 relative z-10">
+            <div
+              className={`mt-16 pt-10 border-t border-[#065016]/5 flex flex-wrap gap-3 relative z-10 ${lastResultLang === "ur" ? "justify-end" : ""}`}
+            >
               {sources.map((s, i) => (
                 <button
                   key={i}
                   onClick={() => handleSourceClick(s)}
                   className="px-5 py-2 bg-[#FDFBF7] text-[10px] font-black text-[#065016] border border-[#065016]/20 rounded-full uppercase tracking-widest shadow-sm hover:border-[#065016] hover:bg-[#065016]/5 transition-all cursor-pointer"
+                  title={`View source: ${s.source}`}
                 >
                   &gt; source::{s.source.toLowerCase().replace(/ /g, "_")}
                 </button>
