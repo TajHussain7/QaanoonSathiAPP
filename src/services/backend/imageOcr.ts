@@ -1,13 +1,14 @@
 /**
  * Image OCR Service
  * Extracts text from images using HF Inference API (document understanding models)
- * Fallback: Tesseract.js for local OCR (CPU-based)
  * Supports: JPG, PNG, WebP, BMP, GIF
  * Languages: Urdu, English
+ *
+ * NOTE: Uses HF Inference API exclusively (no Tesseract fallback)
+ * Reason: HF API is stable on servers, Tesseract.js workers are browser-oriented
  */
 
 import { HfInference } from "@huggingface/inference";
-import Tesseract from "tesseract.js";
 
 export interface OCRResult {
   text: string;
@@ -52,143 +53,73 @@ export async function extractTextFromImageHF(
       ? imageBuffer.toString("base64")
       : Buffer.from(imageBuffer).toString("base64");
 
-    // Use document understanding via HF API with proper inputs format
-    const result = await client.documentQuestionAnswering({
-      model: "naver-clova-ix/donut-base",
-      inputs: {
-        image: base64Image,
-        question: "Extract all text from this document exactly as written.",
-      },
-    } as any);
+    // Use document understanding via HF API
+    // Multiple fallback models for better compatibility
+    const models = [
+      "naver-clova-ix/donut-base", // Primary: Best for documents
+      "microsoft/trocr-large-printed", // Secondary: Good for text
+    ];
 
-    const text = (result as any).answer || "";
-
-    console.log(`✅ HF OCR complete: ${text.length} chars, method: HF API`);
-
-    return {
-      text: text.trim(),
-      language: language,
-      confidence: 0.85,
-      method: "hf-api",
-    };
-  } catch (error: any) {
-    const errorMsg = error.message || String(error);
-    console.warn(
-      `⚠️ HF OCR failed (${errorMsg.slice(0, 60)}), falling back to Tesseract...`,
-    );
-
-    // Fall back to Tesseract.js
-    return extractTextFromImageTesseract(imageBuffer, language);
-  }
-}
-
-/**
- * Extract text from image using Tesseract.js (local, CPU-based OCR)
- * More reliable for diverse text, works offline, but slower
- * Uses Tesseract.js v7 worker-based API
- * @param imageBuffer Buffer or Uint8Array of image file
- * @param language 'ur' for Urdu, 'en' for English
- * @returns Extracted text and confidence
- */
-export async function extractTextFromImageTesseract(
-  imageBuffer: Buffer | Uint8Array,
-  language: "ur" | "en" = "en",
-): Promise<OCRResult> {
-  let worker: any = null;
-
-  try {
-    console.log(
-      `🔤 Extracting text from image (Tesseract.js v7, local OCR)...`,
-    );
-
-    // Map language codes to Tesseract language codes
-    const langMap: Record<string, string> = {
-      ur: "urd", // Urdu
-      en: "eng", // English
-    };
-
-    const tesseractLang = langMap[language] || "eng";
-
-    // Create image from buffer
-    const base64 = Buffer.isBuffer(imageBuffer)
-      ? imageBuffer.toString("base64")
-      : Buffer.from(imageBuffer).toString("base64");
-    const imageSrc = `data:image/png;base64,${base64}`;
-
-    // Create Tesseract worker (v7 API - try createWorker first)
-    console.log(
-      `   Creating Tesseract worker for language: ${tesseractLang}...`,
-    );
-
-    // Try the createWorker API (v7 standard)
-    let createWorkerFn: any;
-    if (typeof (Tesseract as any).createWorker === "function") {
-      createWorkerFn = (Tesseract as any).createWorker;
-    } else if (typeof (Tesseract as any).default?.createWorker === "function") {
-      createWorkerFn = (Tesseract as any).default.createWorker;
-    } else if (typeof (Tesseract as any).create === "function") {
-      createWorkerFn = (Tesseract as any).create;
-    } else {
-      throw new Error(
-        "Tesseract.js API not found. Expected createWorker() or create() function.",
-      );
-    }
-
-    worker = await createWorkerFn();
-
-    // Load and initialize language
-    console.log(`   Loading language: ${tesseractLang}...`);
-    await worker.loadLanguage(tesseractLang);
-    await worker.initialize(tesseractLang);
-
-    // Perform OCR
-    console.log(`   Recognizing text...`);
-    const result = await worker.recognize(imageSrc);
-    const text = result.data.text;
-    const confidence = result.data.confidence || 85; // Confidence from 0-100
-
-    console.log(
-      `✅ Tesseract OCR complete: ${text.length} chars, confidence: ${confidence.toFixed(0)}%`,
-    );
-
-    // Clean up worker
-    await worker.terminate();
-    worker = null;
-
-    return {
-      text: text.trim(),
-      language: language,
-      confidence: confidence / 100, // Convert to 0-1 range
-      method: "tesseract",
-    };
-  } catch (error: any) {
-    // Clean up worker on error
-    if (worker) {
+    let lastError: any = null;
+    for (const model of models) {
       try {
-        await worker.terminate();
-      } catch (e) {
-        console.warn("Error terminating Tesseract worker:", e);
+        console.log(`   Attempting model: ${model}...`);
+        const result = await client.documentQuestionAnswering({
+          model: model,
+          inputs: {
+            image: base64Image,
+            question: "Extract all text from this document exactly as written.",
+          },
+        } as any);
+
+        const text = (result as any).answer || "";
+
+        if (text && text.trim().length > 0) {
+          console.log(`✅ HF OCR complete (${model}): ${text.length} chars`);
+          return {
+            text: text.trim(),
+            language: language,
+            confidence: 0.85,
+            method: "hf-api",
+          };
+        }
+      } catch (modelError: any) {
+        lastError = modelError;
+        console.warn(`   ⚠️ Model ${model} failed, trying next...`);
+        continue;
       }
     }
 
+    // If all models failed
+    throw (
+      lastError || new Error("All HF models failed to extract text from image")
+    );
+  } catch (error: any) {
     const errorMsg = error.message || String(error);
-    console.error(`❌ Tesseract OCR failed: ${errorMsg.slice(0, 100)}`);
+    console.error(`❌ HF Image OCR failed: ${errorMsg.slice(0, 100)}`);
 
-    // Provide detailed error information
-    if (errorMsg.includes("ENOSPC") || errorMsg.includes("out of memory")) {
+    // Provide detailed error guidance
+    if (errorMsg.includes("401") || errorMsg.includes("invalid"))
       throw new Error(
-        "Insufficient memory for OCR. Please try a smaller image.",
+        "Image OCR API authentication failed. Please check HUGGING_API_KEY.",
       );
-    } else if (errorMsg.includes("timeout")) {
-      throw new Error("OCR processing timed out. Please try a simpler image.");
-    } else {
-      throw new Error(`Image OCR failed: ${errorMsg}`);
-    }
+    if (errorMsg.includes("rate limit") || errorMsg.includes("429"))
+      throw new Error(
+        "Image processing rate limit reached. Please try again in a moment.",
+      );
+    if (errorMsg.includes("timeout"))
+      throw new Error(
+        "Image processing timed out. Please try a smaller image.",
+      );
+
+    throw new Error(
+      `Image text extraction failed: ${errorMsg}. Supported formats: JPG, PNG, WebP, BMP, GIF`,
+    );
   }
 }
 
 /**
- * Smart OCR: Try HF API first, fallback to Tesseract automatically
+ * Smart OCR: Uses HF API exclusively (Tesseract.js not compatible with servers)
  * @param imageBuffer Image buffer
  * @param language 'ur' for Urdu, 'en' for English
  * @returns Extracted text with metadata
@@ -197,20 +128,10 @@ export async function extractTextFromImage(
   imageBuffer: Buffer | Uint8Array,
   language: "ur" | "en" = "en",
 ): Promise<OCRResult> {
-  console.log(`📸 Starting smart OCR (language: ${language})...`);
+  console.log(`📸 Starting image OCR (language: ${language})...`);
 
-  try {
-    // Try HF API first
-    return await extractTextFromImageHF(imageBuffer, language);
-  } catch (error) {
-    console.warn("HF API failed, retrying with Tesseract local OCR...");
-    try {
-      return await extractTextFromImageTesseract(imageBuffer, language);
-    } catch (tessError) {
-      console.error("Both OCR methods failed");
-      throw tessError;
-    }
-  }
+  // Use HF API exclusively - Tesseract.js workers are not compatible with Node.js servers
+  return await extractTextFromImageHF(imageBuffer, language);
 }
 
 /**
@@ -274,6 +195,6 @@ export async function extractTextFromImages(
     text: combinedText.trim(),
     language: language,
     confidence: avgConfidence,
-    method: results[0]?.method || "tesseract",
+    method: "hf-api",
   };
 }
