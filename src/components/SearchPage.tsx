@@ -249,47 +249,6 @@ const SearchPage: React.FC<SearchPageProps> = ({
         />
       </div>
 
-      <AnimatePresence>
-        {uploadedFile && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="mb-8 p-6 bg-[#065016]/5 border border-[#065016]/30 rounded-[2rem] flex items-center justify-between"
-          >
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-white rounded-xl shadow-sm">
-                <FileText size={20} className="text-[#065016]" />
-              </div>
-              <div>
-                <span className="text-sm font-black text-[#065016]">
-                  {uploadedFile.name}
-                </span>
-                <p className="text-[10px] text-[#065016] font-bold uppercase tracking-widest">
-                  Ready for analysis
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() =>
-                  handleMultimodalProcess(uploadedFile.data, uploadedFile.type)
-                }
-                className="px-6 py-2 bg-[#065016] text-white text-[10px] font-black uppercase tracking-widest rounded-full hover:bg-[#065016]/90 transition-all"
-              >
-                Start AI OCR
-              </button>
-              <button
-                onClick={() => setUploadedFile(null)}
-                className="p-2 text-[#065016]/30 hover:text-red-500 transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* Main Search Input */}
       <div className="relative group mb-10">
         <div className="absolute -inset-1 bg-gradient-to-r from-[#065016]/20 to-[#065016]/20 rounded-[2.5rem] blur-xl opacity-0 group-focus-within:opacity-100 transition duration-700"></div>
