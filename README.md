@@ -123,6 +123,70 @@ We are working toward a future where:
 
 ---
 
+## 🚀 Deployment Guide
+
+### Prerequisites
+
+Before deploying, ensure you have the following environment variables configured:
+
+- `GEMINI_API_KEY` — Google Generative AI API key
+- `GEMINI_API_KEY_2` — Secondary Gemini API key
+- `GEMINI_API_KEY_3` — Tertiary Gemini API key
+- `SUPABASE_URL` — Your Supabase project URL
+- `SUPABASE_ANON_KEY` — Your Supabase anonymous key
+- `NODE_ENV` — Set to `production` for deployments
+- `PORT` — Default is `3000` (optional, usually auto-set by platform)
+
+See [.env.example](./.env.example) for a complete template.
+
+### Deploying to Render
+
+1. **Push your code to GitHub** (ensure `.env*` is in `.gitignore`)
+2. **Create a new Web Service on Render**:
+   - Connect your GitHub repository
+   - Set the **Build Command** to: `npm install && npm run build && npm run build:server`
+   - Set the **Start Command** to: `npm start`
+3. **Add Environment Variables** in Render Dashboard:
+   - Go to Environment → Add all keys from `.env.example`
+4. **Deploy** — Render will automatically trigger builds on push
+
+### Deploying to Vercel
+
+**Note**: Vercel is primarily designed for serverless functions and static sites. For a full-stack Node.js application like this, Render is recommended. However, if you wish to use Vercel:
+
+1. **Install Vercel CLI** (optional): `npm install -g vercel`
+2. **Deploy**: `vercel`
+3. **Configure Environment Variables** in Vercel Dashboard:
+   - Project Settings → Environment Variables
+   - Add all keys from `.env.example`
+4. **Set Build Command** in Project Settings:
+   - Build Command: `npm run build && npm run build:server`
+   - Output Directory: `dist`
+
+### Troubleshooting Deployments
+
+**Build Fails on Render/Vercel:**
+
+- Ensure `npm install` completes without errors locally: `npm install`
+- Verify all TypeScript compiles: `npm run build:server`
+- Check that `.gitignore` does NOT exclude necessary files (e.g., `src/`, `server.ts`)
+
+**503 Service Unavailable:**
+
+- The server failed to start. Check logs for startup errors.
+- Verify `NODE_ENV=production` is set in your deployment platform.
+
+**403 Forbidden Errors:**
+
+- Missing or invalid API keys. Verify all environment variables are set correctly.
+- Check CORS configuration if requests are coming from a different domain.
+
+**Port Already in Use:**
+
+- The platform should auto-assign PORT. If hardcoded, remove it from server configuration.
+
+---
+
 ## 🤝 Contributing — This Project Is Alive and Growing
 
 Contributions are welcome across all layers of the project. Whether you are a lawyer who can validate dataset coverage, a developer strengthening the API, a designer improving accessibility, or a researcher expanding legal document coverage, there is meaningful work to do.

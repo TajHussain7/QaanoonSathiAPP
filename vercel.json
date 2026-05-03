@@ -1,0 +1,20 @@
+{
+  "buildCommand": "npm run build && npm run build:server",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "nodeVersion": "24.x",
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "functions": {
+    "server.ts": {
+      "runtime": "nodejs24.x"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/server.js"
+    }
+  ]
+}
