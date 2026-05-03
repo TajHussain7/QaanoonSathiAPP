@@ -1,18 +1,7 @@
-import React, { useState, useRef, useCallback } from "react";
-import { useDropzone } from "react-dropzone";
+import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { apiCall } from "../services/apiClient";
-import {
-  Mic,
-  Camera,
-  FileText,
-  Send,
-  X,
-  Copy,
-  Check,
-  Trash2,
-  Pin,
-} from "lucide-react";
+import { Send, Copy, Check, Trash2, Pin } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import SourceModal from "./SourceModal";
 import MediaUploadWidget from "./MediaUploadWidget";
@@ -57,12 +46,6 @@ const SearchPage: React.FC<SearchPageProps> = ({
   const [sources, setSources] = useState<
     Array<{ source: string; section: string }>
   >([]);
-  const [isRecording, setIsRecording] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<{
-    data: string;
-    name: string;
-    type: string;
-  } | null>(null);
 
   const [selectedSource, setSelectedSource] = useState<{
     source: string;
@@ -70,9 +53,6 @@ const SearchPage: React.FC<SearchPageProps> = ({
   } | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
-
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
 
   const [history, setHistory] = useState<HistoryItem[]>([
     {
@@ -92,95 +72,6 @@ const SearchPage: React.FC<SearchPageProps> = ({
   const [showHistory, setShowHistory] = useState(false);
 
   const containsUrdu = (text: string) => /[\u0600-\u06FF]/.test(text);
-
-  const onDrop = useCallback((acceptedFiles: File[]) => {
-    const file = acceptedFiles[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setUploadedFile({
-          data: (reader.result as string).split(",")[1],
-          name: file.name,
-          type: file.type,
-        });
-      };
-      reader.readAsDataURL(file);
-    }
-  }, []);
-
-  const { getRootProps, getInputProps } = useDropzone({
-    onDrop,
-    accept: { "image/*": [], "application/pdf": [] },
-    multiple: false,
-  } as any);
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (e) => audioChunksRef.current.push(e.data);
-      recorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, {
-          type: "audio/mp3",
-        });
-        const reader = new FileReader();
-        reader.onload = async () => {
-          const base64 = (reader.result as string).split(",")[1];
-          await handleMultimodalProcess(base64, "audio/mp3");
-        };
-        reader.readAsDataURL(audioBlob);
-        stream.getTracks().forEach((t) => t.stop());
-      };
-
-      recorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      console.error("Mic access denied:", err);
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  };
-
-  const handleMultimodalProcess = async (
-    base64Data: string,
-    mimeType: string,
-  ) => {
-    setIsLoading(true);
-    setStatusMessage(
-      mimeType.includes("audio")
-        ? "Transcribing legal query..."
-        : "Analyzing document OCR...",
-    );
-
-    try {
-      const response = await apiCall("/api/preprocess/media", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileData: base64Data, mimeType }),
-      });
-
-      const { extracted } = await response.json();
-      if (extracted) {
-        setQuery(extracted);
-        await handleSearch(extracted);
-      }
-    } catch (err) {
-      console.error("Media processing failed:", err);
-      setAnswer("Failed to process your file. Please try text input.");
-    } finally {
-      setIsLoading(false);
-      setStatusMessage("");
-      setUploadedFile(null);
-    }
-  };
 
   const handleSearch = async (customQuery: string | null = null) => {
     const rawQuery = typeof customQuery === "string" ? customQuery : query;
@@ -342,47 +233,6 @@ const SearchPage: React.FC<SearchPageProps> = ({
           </AnimatePresence>
         </div>
       )}
-
-      {/* Search Header Controls */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-        <motion.div
-          whileHover={{ scale: 1.02 }}
-          className="bg-white/80 backdrop-blur p-6 border border-[#065016]/20 rounded-[2rem] flex flex-col items-center text-center cursor-pointer group shadow-sm hover:shadow-md transition-all"
-          onClick={isRecording ? stopRecording : startRecording}
-        >
-          <div
-            className={`w-12 h-12 rounded-2xl flex items-center justify-center mb-4 transition-colors ${isRecording ? "bg-red-500 animate-pulse" : "bg-[#065016]/10 group-hover:bg-[#065016]/20"}`}
-          >
-            <Mic
-              size={20}
-              className={isRecording ? "text-white" : "text-[#065016]"}
-            />
-          </div>
-          <h4 className="text-[10px] font-black tracking-widest text-[#065016]/60 uppercase">
-            Voice Input
-          </h4>
-          <p className="text-[10px] text-[#065016] mt-2 font-bold">
-            {isRecording ? "Listening..." : "Tap to record query"}
-          </p>
-        </motion.div>
-
-        <div
-          {...getRootProps()}
-          className="md:col-span-2 bg-white/80 backdrop-blur p-6 border-2 border-dashed border-[#065016]/20 rounded-[2rem] flex flex-col items-center justify-center cursor-pointer group hover:border-[#065016]/50 transition-all shadow-sm"
-        >
-          <input {...getInputProps()} />
-          <Camera
-            size={24}
-            className="text-[#065016]/40 mb-2 group-hover:text-[#065016]"
-          />
-          <h4 className="text-[10px] font-black tracking-widest text-[#065016]/60 uppercase">
-            Image / Document OCR
-          </h4>
-          <p className="text-[10px] text-[#065016] mt-1 font-bold">
-            Drop legal papers or photos here
-          </p>
-        </div>
-      </div>
 
       {/* Enhanced Media Upload Widget - Audio, Images, PDFs */}
       <div className="mb-10">
