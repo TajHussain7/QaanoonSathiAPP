@@ -12,6 +12,13 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Helper function to resolve module paths for dynamic imports
+const resolveModule = (modulePath: string): string => {
+  const absolutePath = path.resolve(__dirname, modulePath);
+  // Return file:// URL for reliable module loading
+  return new URL(`file://${absolutePath.replace(/\\/g, "/")}`).href;
+};
+
 async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || "3000", 10);
@@ -67,8 +74,9 @@ async function startServer() {
   app.post("/api/auth/register", async (req, res) => {
     const { email, password, full_name, preferred_lang } = req.body;
     try {
-      const { supabase } =
-        await import("./src/services/backend/supabaseClient.js");
+      const { supabase } = await import(
+        resolveModule("src/services/backend/supabaseClient.js")
+      );
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -115,8 +123,9 @@ async function startServer() {
     }
 
     try {
-      const { supabase } =
-        await import("./src/services/backend/supabaseClient.js");
+      const { supabase } = await import(
+        resolveModule("src/services/backend/supabaseClient.js")
+      );
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -135,8 +144,9 @@ async function startServer() {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) return res.status(401).json({ error: "Unauthorized" });
     try {
-      const { supabase } =
-        await import("./src/services/backend/supabaseClient.js");
+      const { supabase } = await import(
+        resolveModule("src/services/backend/supabaseClient.js")
+      );
       const { data, error } = await supabase.auth.getUser(token);
       if (error) throw error;
       res.json({ user: data.user });
@@ -149,8 +159,9 @@ async function startServer() {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) return res.status(401).json({ error: "Unauthorized" });
     try {
-      const { supabase } =
-        await import("./src/services/backend/supabaseClient.js");
+      const { supabase } = await import(
+        resolveModule("src/services/backend/supabaseClient.js")
+      );
       const { data: userData, error: userError } =
         await supabase.auth.getUser(token);
       if (userError) throw userError;
@@ -176,8 +187,9 @@ async function startServer() {
     }
 
     try {
-      const { searchSimilarChunks } =
-        await import("./src/services/backend/supabaseClient.js");
+      const { searchSimilarChunks } = await import(
+        resolveModule("src/services/backend/supabaseClient.js")
+      );
       const results = await searchSimilarChunks(embedding, 3, category);
       res.json({ results });
     } catch (error: any) {
@@ -190,8 +202,9 @@ async function startServer() {
   app.post("/api/preprocess/clean", async (req, res) => {
     const { query } = req.body;
     try {
-      const { cleanAndNormalizeQuery } =
-        await import("./src/services/backend/inputProcessor.js");
+      const { cleanAndNormalizeQuery } = await import(
+        resolveModule("src/services/backend/inputProcessor.js")
+      );
       const cleaned = await cleanAndNormalizeQuery(query);
       res.json({ cleaned });
     } catch (error) {
@@ -203,8 +216,9 @@ async function startServer() {
   app.post("/api/preprocess/media", async (req, res) => {
     const { fileData, mimeType } = req.body;
     try {
-      const { extractTextFromMedia } =
-        await import("./src/services/backend/inputProcessor.js");
+      const { extractTextFromMedia } = await import(
+        resolveModule("src/services/backend/inputProcessor.js")
+      );
       const extracted = await extractTextFromMedia(fileData, mimeType);
       res.json({ extracted });
     } catch (error) {
@@ -221,8 +235,9 @@ async function startServer() {
 
       const language = req.body.language || "auto"; // 'ur', 'en', or 'auto'
 
-      const { extractTextFromMedia } =
-        await import("./src/services/backend/mediaExtractor.js");
+      const { extractTextFromMedia } = await import(
+        resolveModule("src/services/backend/mediaExtractor.js")
+      );
 
       const result = await extractTextFromMedia(
         req.file.buffer,
@@ -264,8 +279,9 @@ async function startServer() {
 
       const language = req.body.language || "en"; // 'ur' or 'en'
 
-      const { extractTextFromMedia, validateExtractionResult } =
-        await import("./src/services/backend/mediaExtractor.js");
+      const { extractTextFromMedia, validateExtractionResult } = await import(
+        resolveModule("src/services/backend/mediaExtractor.js")
+      );
 
       const result = await extractTextFromMedia(
         req.file.buffer,
@@ -313,10 +329,12 @@ async function startServer() {
       const language = req.body.language || "en";
       const category = req.body.category || "";
 
-      const { extractTextFromMedia, normalizeExtractedText } =
-        await import("./src/services/backend/mediaExtractor.js");
-      const { performRagQuery } =
-        await import("./src/services/backend/ragEngine.js");
+      const { extractTextFromMedia, normalizeExtractedText } = await import(
+        resolveModule("src/services/backend/mediaExtractor.js")
+      );
+      const { performRagQuery } = await import(
+        resolveModule("src/services/backend/ragEngine.js")
+      );
 
       // Step 1: Extract text from media
       const extractionResult = await extractTextFromMedia(
@@ -342,8 +360,9 @@ async function startServer() {
       let userId: string | undefined;
       const token = req.headers.authorization?.split(" ")[1];
       if (token && token !== "null") {
-        const { supabase } =
-          await import("./src/services/backend/supabaseClient.js");
+        const { supabase } = await import(
+          resolveModule("src/services/backend/supabaseClient.js")
+        );
         const { data: userData } = await supabase.auth.getUser(token);
         if (userData?.user) {
           userId = userData.user.id;
@@ -394,16 +413,18 @@ async function startServer() {
       const token = req.headers.authorization?.split(" ")[1];
 
       if (token && token !== "null") {
-        const { supabase } =
-          await import("./src/services/backend/supabaseClient.js");
+        const { supabase } = await import(
+          resolveModule("src/services/backend/supabaseClient.js")
+        );
         const { data: userData } = await supabase.auth.getUser(token);
         if (userData?.user) {
           userId = userData.user.id;
         }
       }
 
-      const { performRagQuery } =
-        await import("./src/services/backend/ragEngine.js");
+      const { performRagQuery } = await import(
+        resolveModule("src/services/backend/ragEngine.js")
+      );
       const result = await performRagQuery(query, category, lang, userId);
       res.json(result);
     } catch (error: any) {
