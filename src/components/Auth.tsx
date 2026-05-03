@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
+import { apiCall } from "../services/apiClient";
 
 interface AuthProps {
   t: any;
@@ -37,7 +38,7 @@ const Auth: React.FC<AuthProps> = ({
       : { ...formData, preferred_lang: lang };
 
     try {
-      const response = await fetch(endpoint, {
+      const response = await apiCall(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

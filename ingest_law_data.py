@@ -16,6 +16,7 @@ import os
 import sys
 import time
 import logging
+import json
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 import requests
@@ -23,14 +24,13 @@ from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Auto-install dependencies
-for pkg_name, import_name in [("PyPDF2", "PyPDF2"), ("supabase", "supabase")]:
+for pkg_name, import_name in [("supabase", "supabase")]:
     try:
         __import__(import_name)
     except ImportError:
         print(f"⏳ Installing {pkg_name}...")
         os.system(f"pip install {pkg_name}")
 
-import PyPDF2
 from supabase import create_client
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -143,30 +143,65 @@ def generate_embedding(text: str) -> Optional[List[float]]:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# PDF PROCESSING
+# JSON PROCESSING
 # ═════════════════════════════════════════════════════════════════════════════
 
-def extract_text_from_pdf(pdf_path: Path) -> Optional[str]:
-    """Extract text from PDF file."""
+def load_law_chunks_json() -> Optional[List[Dict]]:
+    """Load law chunks from law_chunks.json."""
+    json_path = LAW_DATA_DIR / "law_chunks.json"
     try:
-        text = ""
-        with open(pdf_path, 'rb') as f:
-            reader = PyPDF2.PdfReader(f)
-            for page_num, page in enumerate(reader.pages):
-                page_text = page.extract_text()
-                if page_text:
-                    text += f"\n--- Page {page_num + 1} ---\n{page_text}"
-        
-        if not text.strip():
-            logger.warning(f"  ⚠️  No text extracted from {pdf_path.name}")
+        if not json_path.exists():
+            logger.warning(f"  ⚠️  law_chunks.json not found at {json_path}")
             return None
         
-        logger.debug(f"  ✅ Extracted {len(text)} characters")
-        return text
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Extract chunks from the JSON structure
+        chunks = data.get("chunks", [])
+        if not chunks:
+            logger.warning("  ⚠️  No chunks found in law_chunks.json")
+            return None
+        
+        logger.info(f"  ✅ Loaded {len(chunks)} chunks from law_chunks.json")
+        return chunks
         
     except Exception as e:
-        logger.error(f"  ❌ PDF extraction failed: {str(e)}") 
+        logger.error(f"  ❌ Failed to load law_chunks.json: {str(e)}")
         return None
+
+
+def load_law_questions_json() -> Optional[List[Dict]]:
+    """Load Q&A pairs from law_questions.json."""
+    json_path = LAW_DATA_DIR / "law_questions.json"
+    try:
+        if not json_path.exists():
+            logger.warning(f"  ⚠️  law_questions.json not found at {json_path}")
+            return None
+        
+        with open(json_path, 'r', encoding='utf-8') as f:
+            questions = json.load(f)
+        
+        if not questions:
+            logger.warning("  ⚠️  No questions found in law_questions.json")
+            return None
+        
+        logger.info(f"  ✅ Loaded {len(questions)} Q&A pairs from law_questions.json")
+        return questions
+        
+    except Exception as e:
+        logger.error(f"  ❌ Failed to load law_questions.json: {str(e)}")
+        return None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PDF PROCESSING (DEPRECATED - KEPT FOR REFERENCE)
+# ═════════════════════════════════════════════════════════════════════════════
+
+# def extract_text_from_pdf(pdf_path: Path) -> Optional[str]:
+#     """Extract text from PDF file. [DEPRECATED - Use JSON instead]"""
+#     pass
+
 
 
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE) -> List[str]:
@@ -258,9 +293,9 @@ def insert_documents(supabase, documents: List[Dict]) -> Tuple[int, int]:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def main():
-    """Main ingestion pipeline."""
+    """Main ingestion pipeline - Process JSON law data."""
     logger.info("\n" + "═" * 80)
-    logger.info("🚀 QaanoonSathi Legal Document Ingestion")
+    logger.info("🚀 QaanoonSathi Legal Document Ingestion (JSON Mode)")
     logger.info("═" * 80)
     
     # Validate directory
@@ -268,17 +303,9 @@ def main():
         logger.error(f"❌ Directory not found: {LAW_DATA_DIR}")
         return
     
-    # Find PDFs
-    pdf_files = list(LAW_DATA_DIR.glob("*.pdf")) + list(LAW_DATA_DIR.glob("**/*.pdf"))
-    pdf_files = list(set(pdf_files))
-    
-    if not pdf_files:
-        logger.warning(f"⚠️  No PDFs found in {LAW_DATA_DIR}")
-        return
-    
-    logger.info(f"📄 Found {len(pdf_files)} PDF files")
+    logger.info(f"📂 Processing law_data directory: {LAW_DATA_DIR}")
     logger.info(f"🔧 Model: {GEMINI_EMBEDDING_MODEL} ({EXPECTED_DIMS} dims)")
-    logger.info(f"📊 Chunk size: {CHUNK_SIZE} characters")
+    logger.info(f"📊 Batch size: {BATCH_SIZE} documents")
     logger.info("-" * 80)
     
     # Initialize Supabase
@@ -289,73 +316,126 @@ def main():
     # Statistics
     total_successful = 0
     total_failed = 0
-    failed_files = []
     
-    # Process each PDF
-    for pdf_idx, pdf_path in enumerate(pdf_files, 1):
-        logger.info(f"\n[{pdf_idx}/{len(pdf_files)}] {pdf_path.name}")
-        
-        # Extract text
-        text = extract_text_from_pdf(pdf_path)
-        if not text:
-            failed_files.append(pdf_path.name)
-            continue
-        
-        # Chunk text
-        chunks = chunk_text(text)
-        logger.info(f"  📦 {len(chunks)} chunks")
-        
-        # Prepare documents with parallel embedding generation
+    # ─────────────────────────────────────────────────────────────────
+    # PROCESS LAW CHUNKS
+    # ─────────────────────────────────────────────────────────────────
+    logger.info("\n📄 PROCESSING: law_chunks.json")
+    logger.info("-" * 80)
+    
+    chunks = load_law_chunks_json()
+    if chunks:
         documents = []
-        category = detect_category(pdf_path.name)
         
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             # Submit all embedding tasks
             future_to_chunk = {
-                executor.submit(generate_embedding, chunk): (chunk_idx, chunk)
-                for chunk_idx, chunk in enumerate(chunks)
+                executor.submit(generate_embedding, chunk.get("text", "")): chunk
+                for chunk in chunks if chunk.get("text")
             }
             
             # Collect results as they complete
-            for future in as_completed(future_to_chunk):
-                chunk_idx, chunk = future_to_chunk[future]
+            for idx, future in enumerate(as_completed(future_to_chunk), 1):
+                chunk = future_to_chunk[future]
                 try:
                     embedding = future.result()
                     if embedding:
                         documents.append({
-                            "content": chunk,
+                            "content": chunk.get("text", "")[:3000],  # Truncate for safety
                             "embedding": embedding,
-                            "category": category,
-                            "source": pdf_path.stem,
-                            "section": f"Chunk {chunk_idx + 1}",
+                            "category": detect_category(chunk.get("law_name", "general")),
+                            "source": chunk.get("law_name", chunk.get("source", "unknown")),
+                            "section": f"Chunk {chunk.get('chunk_index', 0) + 1}",
                             "lang": "mixed",
                         })
+                        
+                        # Insert in batches
+                        if len(documents) >= BATCH_SIZE:
+                            successful, failed = insert_documents(supabase, documents)
+                            total_successful += successful
+                            total_failed += failed
+                            documents = []
+                            logger.debug(f"  ✓ Processed {idx}/{len(chunks)} chunks")
                     else:
-                        logger.debug(f"    ⚠️  Skipping chunk {chunk_idx + 1}")
+                        logger.debug(f"    ⚠️  Skipping chunk {idx}")
                 except Exception as e:
-                    logger.warning(f"    ⚠️  Chunk {chunk_idx + 1} failed: {str(e)[:50]}")
+                    logger.warning(f"    ⚠️  Chunk {idx} failed: {str(e)[:50]}")
+                    total_failed += 1
         
-        # Insert batch
+        # Insert remaining documents
         if documents:
             successful, failed = insert_documents(supabase, documents)
             total_successful += successful
             total_failed += failed
         
-        logger.info(f"  ✅ Completed")
+        logger.info(f"✅ law_chunks.json processed")
+    
+    # ─────────────────────────────────────────────────────────────────
+    # PROCESS Q&A PAIRS (OPTIONAL)
+    # ─────────────────────────────────────────────────────────────────
+    logger.info("\n❓ PROCESSING: law_questions.json (Q&A pairs)")
+    logger.info("-" * 80)
+    
+    questions = load_law_questions_json()
+    if questions:
+        documents = []
+        
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            # Combine question + answer for better semantic embedding
+            future_to_qa = {
+                executor.submit(
+                    generate_embedding, 
+                    f"{qa.get('question', '')} {qa.get('answer', '')}"
+                ): qa
+                for qa in questions if qa.get('question') and qa.get('answer')
+            }
+            
+            # Collect results as they complete
+            for idx, future in enumerate(as_completed(future_to_qa), 1):
+                qa = future_to_qa[future]
+                try:
+                    embedding = future.result()
+                    if embedding:
+                        documents.append({
+                            "content": f"Q: {qa.get('question', '')}\nA: {qa.get('answer', '')}"[:3000],
+                            "embedding": embedding,
+                            "category": "qa",
+                            "source": qa.get("source", "Q&A Database"),
+                            "section": qa.get("topic", "General"),
+                            "lang": "mixed",
+                        })
+                        
+                        # Insert in batches
+                        if len(documents) >= BATCH_SIZE:
+                            successful, failed = insert_documents(supabase, documents)
+                            total_successful += successful
+                            total_failed += failed
+                            documents = []
+                            logger.debug(f"  ✓ Processed {idx}/{len(questions)} Q&A pairs")
+                    else:
+                        logger.debug(f"    ⚠️  Skipping Q&A {idx}")
+                except Exception as e:
+                    logger.warning(f"    ⚠️  Q&A {idx} failed: {str(e)[:50]}")
+                    total_failed += 1
+        
+        # Insert remaining documents
+        if documents:
+            successful, failed = insert_documents(supabase, documents)
+            total_successful += successful
+            total_failed += failed
+        
+        logger.info(f"✅ law_questions.json processed")
     
     # Summary
     logger.info("\n" + "═" * 80)
     logger.info("📊 INGESTION SUMMARY")
     logger.info("═" * 80)
-    logger.info(f"PDFs processed:       {len(pdf_files) - len(failed_files)}/{len(pdf_files)}")
-    logger.info(f"Documents stored:     {total_successful}")
-    logger.info(f"Documents failed:     {total_failed}")
-    
-    if failed_files:
-        logger.warning(f"Failed files: {', '.join(failed_files)}")
-    
+    logger.info(f"Total Documents Inserted:  {total_successful}")
+    logger.info(f"Total Documents Failed:    {total_failed}")
+    logger.info(f"Success Rate:              {total_successful / (total_successful + total_failed) * 100:.1f}%" if (total_successful + total_failed) > 0 else "N/A")
     logger.info("═" * 80)
-    logger.info("✅ Ingestion complete!\n")
+    logger.info("✨ Ingestion complete! Your law data is now searchable in the vector DB.\n")
+
 
 
 if __name__ == "__main__":

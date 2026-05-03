@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import { motion, AnimatePresence } from "motion/react";
+import { apiCall } from "../services/apiClient";
 import {
   Mic,
   Camera,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import SourceModal from "./SourceModal";
+import MediaUploadWidget from "./MediaUploadWidget";
 
 interface Result {
   answer: string;
@@ -159,7 +161,7 @@ const SearchPage: React.FC<SearchPageProps> = ({
     );
 
     try {
-      const response = await fetch("/api/preprocess/media", {
+      const response = await apiCall("/api/preprocess/media", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fileData: base64Data, mimeType }),
@@ -197,7 +199,7 @@ const SearchPage: React.FC<SearchPageProps> = ({
       const headers: any = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const response = await fetch("/api/query", {
+      const response = await apiCall("/api/query", {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -380,6 +382,21 @@ const SearchPage: React.FC<SearchPageProps> = ({
             Drop legal papers or photos here
           </p>
         </div>
+      </div>
+
+      {/* Enhanced Media Upload Widget - Audio, Images, PDFs */}
+      <div className="mb-10">
+        <MediaUploadWidget
+          onTextExtracted={async (text, mediaType, language) => {
+            setQuery(text);
+            await handleSearch(text);
+          }}
+          onError={(error) => {
+            setStatusMessage(`Error: ${error}`);
+            setTimeout(() => setStatusMessage(""), 3000);
+          }}
+          disabled={isLoading}
+        />
       </div>
 
       <AnimatePresence>

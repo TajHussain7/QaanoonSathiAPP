@@ -3,6 +3,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import cors from "cors";
+import multer from "multer";
 import dotenv from "dotenv";
 
 // Load environment variables
@@ -13,7 +14,7 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
   // Log environment status
   console.log("🛠️ Environment Status Check:");
@@ -43,6 +44,14 @@ async function startServer() {
 
   app.use(cors());
   app.use(express.json({ limit: "10mb" }));
+
+  // Configure multer for file uploads (media processing)
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+      fileSize: 25 * 1024 * 1024, // 25MB limit for media files
+    },
+  });
 
   // API Routes
   app.get("/api/health", (req, res) => {
@@ -200,6 +209,175 @@ async function startServer() {
       res.json({ extracted });
     } catch (error) {
       res.status(500).json({ error: "Media processing failed" });
+    }
+  });
+
+  // NEW: Audio Transcription Endpoint
+  app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No audio file provided" });
+      }
+
+      const language = req.body.language || "auto"; // 'ur', 'en', or 'auto'
+
+      const { extractTextFromMedia } =
+        await import("./src/services/backend/mediaExtractor.js");
+
+      const result = await extractTextFromMedia(
+        req.file.buffer,
+        req.file.mimetype,
+        language,
+      );
+
+      if (result.error) {
+        return res.status(400).json({
+          error: result.error,
+          details: `Audio transcription failed`,
+        });
+      }
+
+      console.log(
+        `✅ Transcription endpoint: ${result.text.length} chars extracted`,
+      );
+
+      res.json({
+        text: result.text,
+        language: result.language,
+        confidence: result.confidence,
+        source: "whisper",
+      });
+    } catch (error: any) {
+      console.error("Transcription error:", error);
+      res.status(500).json({
+        error: error.message || "Audio transcription failed",
+      });
+    }
+  });
+
+  // NEW: Image/PDF Text Extraction Endpoint
+  app.post("/api/extract-text", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file provided" });
+      }
+
+      const language = req.body.language || "en"; // 'ur' or 'en'
+
+      const { extractTextFromMedia, validateExtractionResult } =
+        await import("./src/services/backend/mediaExtractor.js");
+
+      const result = await extractTextFromMedia(
+        req.file.buffer,
+        req.file.mimetype,
+        language,
+      );
+
+      // Validate extraction result
+      const validation = validateExtractionResult(result);
+      if (!validation.isValid) {
+        return res.status(400).json({
+          error: validation.message,
+          mediaType: result.mediaType,
+        });
+      }
+
+      console.log(
+        `✅ Extract-text endpoint: ${result.text.length} chars extracted from ${result.mediaType}`,
+      );
+
+      res.json({
+        text: result.text,
+        mediaType: result.mediaType,
+        language: result.language,
+        confidence: result.confidence,
+        method: result.method,
+        metadata: result.metadata,
+        message: validation.message,
+      });
+    } catch (error: any) {
+      console.error("Text extraction error:", error);
+      res.status(500).json({
+        error: error.message || "File text extraction failed",
+      });
+    }
+  });
+
+  // NEW: Combined Media Processing Endpoint (text + RAG)
+  app.post("/api/process-media", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file provided" });
+      }
+
+      const language = req.body.language || "en";
+      const category = req.body.category || "";
+
+      const { extractTextFromMedia, normalizeExtractedText } =
+        await import("./src/services/backend/mediaExtractor.js");
+      const { performRagQuery } =
+        await import("./src/services/backend/ragEngine.js");
+
+      // Step 1: Extract text from media
+      const extractionResult = await extractTextFromMedia(
+        req.file.buffer,
+        req.file.mimetype,
+        language,
+      );
+
+      if (extractionResult.error) {
+        return res.status(400).json({
+          error: extractionResult.error,
+          mediaType: extractionResult.mediaType,
+        });
+      }
+
+      // Step 2: Normalize extracted text
+      const normalizedText = normalizeExtractedText(
+        extractionResult.text,
+        extractionResult.mediaType,
+      );
+
+      // Step 3: Get user ID from token (optional)
+      let userId: string | undefined;
+      const token = req.headers.authorization?.split(" ")[1];
+      if (token && token !== "null") {
+        const { supabase } =
+          await import("./src/services/backend/supabaseClient.js");
+        const { data: userData } = await supabase.auth.getUser(token);
+        if (userData?.user) {
+          userId = userData.user.id;
+        }
+      }
+
+      // Step 4: Perform RAG query on extracted text
+      const ragResult = await performRagQuery(
+        normalizedText,
+        category,
+        language,
+        userId,
+        extractionResult.mediaType, // Pass source type for source-aware processing
+      );
+
+      console.log(
+        `✅ Process-media endpoint: Extracted ${extractionResult.text.length} chars, generated RAG answer`,
+      );
+
+      res.json({
+        extracted: {
+          text: extractionResult.text,
+          mediaType: extractionResult.mediaType,
+          confidence: extractionResult.confidence,
+        },
+        answer: ragResult.answer,
+        sources: ragResult.sources,
+        llmUsed: ragResult.llmUsed,
+      });
+    } catch (error: any) {
+      console.error("Process-media error:", error);
+      res.status(500).json({
+        error: error.message || "Media processing and RAG query failed",
+      });
     }
   });
 

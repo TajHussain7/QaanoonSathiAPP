@@ -1,6 +1,10 @@
 import { searchSimilarChunks } from "./supabaseClient.js";
 import { generateAnswer } from "./llmService.js";
 import { getAllGeminiApiKeys } from "./utils.js";
+import {
+  cleanAndNormalizeQuery,
+  type QuerySourceType,
+} from "./inputProcessor.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EMBEDDING SYSTEM: Google Gemini gemini-embedding-001 (REST API - v1beta)
@@ -160,22 +164,39 @@ function normalizeCategory(category: string): string {
 /**
  * Main RAG query function.
  * Flow: embed query → search Supabase → generate answer from context
+ * Now with source-aware processing for audio, images, and PDFs
  */
 export async function performRagQuery(
   query: string,
   category: string = "",
   lang: string = "en",
   userId?: string,
+  sourceType: QuerySourceType = "text",
 ) {
   console.log(
-    `🔍 RAG query: "${query.substring(0, 60)}..." | cat: ${category} | lang: ${lang}`,
+    `🔍 RAG query: "${query.substring(0, 60)}..." | cat: ${category} | lang: ${lang} | source: ${sourceType}`,
   );
 
   try {
+    // ── 0. Clean and normalize query (source-aware) ──────────────────────────
+    let cleanedQuery = query;
+    try {
+      cleanedQuery = await cleanAndNormalizeQuery(query, sourceType);
+      console.log(
+        `✅ Query cleaned: "${cleanedQuery.substring(0, 60)}..." (source: ${sourceType})`,
+      );
+    } catch (cleanErr) {
+      console.warn(
+        `⚠️ Query cleaning failed (${sourceType}), using raw query`,
+        cleanErr,
+      );
+      cleanedQuery = query;
+    }
+
     // ── 1. Embed the query ──────────────────────────────────────────────────
     let embedding: number[];
     try {
-      embedding = await generateEmbedding(query);
+      embedding = await generateEmbedding(cleanedQuery);
     } catch (embedErr: any) {
       console.error("❌ Embedding failed:", embedErr.message);
       // Return graceful error — don't crash, let fallback LLM respond
@@ -187,6 +208,7 @@ export async function performRagQuery(
         sources: [],
         error: embedErr.message,
         llmUsed: "None",
+        sourceType,
       };
     }
 
@@ -208,6 +230,7 @@ export async function performRagQuery(
             : "This specific information was not found in our legal database. Please consult a licensed Pakistani attorney (Vakeel) for specific legal advice.",
         sources: [],
         llmUsed: "None",
+        sourceType,
       };
     }
 
@@ -228,6 +251,7 @@ export async function performRagQuery(
         source: c.source,
         section: c.section || "",
       })),
+      sourceType, // Include source type in result for frontend tracking
     };
 
     // ── 6. Save to history (non-blocking) ────────────────────────────────────
@@ -241,6 +265,7 @@ export async function performRagQuery(
             category: dbCategory,
             lang,
             sources: result.sources,
+            source_type: sourceType, // Track input source type
           }),
         )
         .catch((err) => console.warn("History save failed (non-fatal):", err));

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiCall } from '../services/apiClient';
 
 interface DashboardProps {
   user: any;
@@ -14,7 +15,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, lang, token, setCurrentPage
   useEffect(() => {
     const fetchHistory = async () => {
       try {
-        const res = await fetch('/api/auth/history', {
+        const res = await apiCall('/api/auth/history', {
           headers: {
             'Authorization': `Bearer ${token}`
           }

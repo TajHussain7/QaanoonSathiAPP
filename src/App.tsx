@@ -6,6 +6,7 @@ import License from './components/Licence'
 import Emergency from './components/Emergency' 
 import Auth from './components/Auth'
 import Dashboard from './components/Dashboard'
+import { apiCall } from './services/apiClient'
 
 /**
  * App Component
@@ -23,7 +24,7 @@ function App() {
     const fetchUser = async () => {
       if (!token) return;
       try {
-        const res = await fetch('/api/auth/me', {
+        const res = await apiCall('/api/auth/me', {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (res.ok) {
