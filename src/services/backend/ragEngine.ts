@@ -68,7 +68,9 @@ async function generateEmbedding(text: string): Promise<number[]> {
         });
 
         if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
+          const errorData = (await response
+            .json()
+            .catch(() => ({}) as any)) as any;
           const errorMsg =
             errorData.error?.message || `HTTP ${response.status}`;
 
@@ -94,7 +96,7 @@ async function generateEmbedding(text: string): Promise<number[]> {
           throw new Error(errorMsg);
         }
 
-        const data = await response.json();
+        const data = (await response.json()) as any;
         const embedding = data.embedding?.values;
 
         if (!Array.isArray(embedding) || embedding.length === 0) {
