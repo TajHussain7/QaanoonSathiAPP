@@ -9,10 +9,10 @@ const getBackendUrl = (): string => {
   if (import.meta.env.VITE_BACKEND_URL) {
     return import.meta.env.VITE_BACKEND_URL;
   }
-  
+
   // For development or same-origin deployment
   // Returns empty string to use relative URLs (same origin)
-  return '';
+  return "";
 };
 
 export const BACKEND_URL = getBackendUrl();
@@ -23,16 +23,16 @@ export const BACKEND_URL = getBackendUrl();
  */
 export const apiCall = async (
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<Response> => {
   const url = BACKEND_URL ? `${BACKEND_URL}${endpoint}` : endpoint;
-  
+
   // Only set Content-Type for non-FormData requests
   const headers: any = options.headers || {};
-  if (!(options.body instanceof FormData) && !headers['Content-Type']) {
-    headers['Content-Type'] = 'application/json';
+  if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
   }
-  
+
   return fetch(url, {
     ...options,
     headers,
@@ -44,7 +44,7 @@ export const apiCall = async (
  */
 export const apiRequest = async <T = any>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<T> => {
   const response = await apiCall(endpoint, options);
   if (!response.ok) {
