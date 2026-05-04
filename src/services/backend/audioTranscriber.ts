@@ -1,11 +1,14 @@
 /**
  * Audio Transcription Service
- * Converts audio files to text using HF Inference API (Whisper model)
- * Supports: MP3, WAV, M4A, OGG, FLAC, webm
+ * Converts audio files to text using Google Gemini API
+ * Supports: webm, ogg, mp3, wav, m4a, flac, aac
  * Languages: Urdu, English, auto-detect
+ *
+ * Switched from HuggingFace (fal-ai Blob incompatibility) to Gemini Flash
+ * which accepts base64-encoded audio inline and already has working API keys.
  */
 
-import { HfInference } from "@huggingface/inference";
+import { getAllGeminiApiKeys } from "./utils.js";
 
 export interface TranscriptionResult {
   text: string;
@@ -13,77 +16,173 @@ export interface TranscriptionResult {
   confidence?: number;
 }
 
+const GEMINI_API_ENDPOINT =
+  "https://generativelanguage.googleapis.com/v1beta/models";
+const TRANSCRIPTION_MODEL = "gemini-1.5-flash";
+
 /**
- * Get HF Inference client with API key from .env
+ * Map common audio MIME types to Gemini-supported formats.
+ * Gemini supports: audio/wav, audio/mp3, audio/aiff, audio/aac,
+ *                  audio/ogg, audio/flac, audio/webm
  */
-function getHFClient(): HfInference {
-  const token = process.env.HUGGING_API_KEY;
-  if (!token) {
-    throw new Error(
-      "HUGGING_API_KEY not found in .env — required for audio transcription",
-    );
-  }
-  return new HfInference(token);
+function normalizeAudioMimeType(mimeType?: string): string {
+  if (!mimeType) return "audio/webm";
+  const lower = mimeType.toLowerCase().split(";")[0].trim();
+  const supported = [
+    "audio/wav",
+    "audio/mp3",
+    "audio/mpeg",
+    "audio/aiff",
+    "audio/aac",
+    "audio/ogg",
+    "audio/flac",
+    "audio/webm",
+  ];
+  if (supported.includes(lower)) return lower;
+  if (lower.includes("webm")) return "audio/webm";
+  if (lower.includes("ogg")) return "audio/ogg";
+  if (lower.includes("mp3") || lower.includes("mpeg")) return "audio/mp3";
+  if (lower.includes("wav")) return "audio/wav";
+  return "audio/webm"; // safest default (what browsers record)
 }
 
 /**
- * Transcribe audio file using Whisper Large V3 via HF Inference API
- * @param audioBuffer Buffer or Uint8Array of audio file
- * @param language Optional: 'ur' for Urdu, 'en' for English, null for auto-detect
- * @returns Transcribed text and detected language
+ * Build a language-aware transcription prompt
+ */
+function buildTranscriptionPrompt(language?: string | null): string {
+  if (language === "ur") {
+    return (
+      "This audio is in Urdu. Transcribe it exactly into Urdu script. " +
+      "Output only the transcribed text with no extra commentary."
+    );
+  }
+  if (language === "en") {
+    return (
+      "Transcribe this English audio recording exactly. " +
+      "Output only the transcribed text with no extra commentary."
+    );
+  }
+  return (
+    "Transcribe this audio recording exactly. " +
+    "The speaker may use English or Urdu. " +
+    "Output only the transcribed text with no extra commentary."
+  );
+}
+
+/**
+ * Transcribe audio using Google Gemini 1.5 Flash.
+ * Accepts a Buffer or Uint8Array and optional MIME type.
  */
 export async function transcribeAudio(
   audioBuffer: Buffer | Uint8Array,
   language?: string | null,
+  mimeType?: string,
 ): Promise<TranscriptionResult> {
-  const client = getHFClient();
-
-  try {
-    console.log(`🎤 Transcribing audio (${audioBuffer.length} bytes)...`);
-
-    // Use Whisper Large V3 via HF Inference API
-    const result = await client.automaticSpeechRecognition({
-      model: "openai/whisper-large-v3",
-      data: audioBuffer,
-    });
-
-    const text = (result as any).text || "";
-    const detectedLanguage = (result as any).language || "unknown";
-
-    console.log(
-      `✅ Transcription complete: ${text.length} chars, language: ${detectedLanguage}`,
+  const allKeys = getAllGeminiApiKeys();
+  if (allKeys.length === 0) {
+    throw new Error(
+      "No Gemini API keys found — set GEMINI_API_KEY in environment variables",
     );
-
-    return {
-      text: text.trim(),
-      language: detectedLanguage || language || "unknown",
-      confidence: 0.95, // HF API doesn't return confidence, estimate high
-    };
-  } catch (error: any) {
-    const errorMsg = error.message || String(error);
-    console.error(`❌ Transcription failed: ${errorMsg.slice(0, 100)}`);
-
-    // Provide helpful error message
-    if (errorMsg.includes("503")) {
-      throw new Error(
-        "HF model loading — try again in 20 seconds (rate limited)",
-      );
-    } else if (errorMsg.includes("401")) {
-      throw new Error("Invalid HF token — check HUGGING_API_KEY in .env");
-    } else if (errorMsg.includes("429")) {
-      throw new Error(
-        "HF API rate limit exceeded — try again in a few moments",
-      );
-    }
-
-    throw new Error(`Audio transcription failed: ${errorMsg}`);
   }
+
+  const resolvedMime = normalizeAudioMimeType(mimeType);
+  const base64Audio = Buffer.isBuffer(audioBuffer)
+    ? audioBuffer.toString("base64")
+    : Buffer.from(audioBuffer).toString("base64");
+
+  const prompt = buildTranscriptionPrompt(language);
+
+  console.log(
+    `🎤 Transcribing audio via Gemini (${resolvedMime}, ${audioBuffer.length} bytes, lang: ${language || "auto"})...`,
+  );
+
+  let lastError: Error | null = null;
+
+  for (let i = 0; i < allKeys.length; i++) {
+    const apiKey = allKeys[i];
+    const keyLabel = i === 0 ? "Primary" : `Fallback ${i}`;
+
+    try {
+      const url = `${GEMINI_API_ENDPOINT}/${TRANSCRIPTION_MODEL}:generateContent?key=${apiKey}`;
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                {
+                  inlineData: {
+                    mimeType: resolvedMime,
+                    data: base64Audio,
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            maxOutputTokens: 2048,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errData = (await response.json().catch(() => ({}))) as any;
+        const msg = errData.error?.message || `HTTP ${response.status}`;
+
+        if (response.status === 429) {
+          throw new Error("Gemini rate limit — try again in a moment");
+        }
+        if (response.status === 401 || response.status === 403) {
+          throw new Error(`Invalid Gemini API key (${keyLabel})`);
+        }
+        throw new Error(msg);
+      }
+
+      const data = (await response.json()) as any;
+      const text =
+        data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+
+      if (!text || text.length === 0) {
+        throw new Error(
+          "No speech detected in audio. Please speak clearly and try again.",
+        );
+      }
+
+      console.log(
+        `✅ Transcription complete (${keyLabel}): ${text.length} chars`,
+      );
+
+      // Detect language from script if not provided
+      const detectedLang =
+        language || (/[\u0600-\u06FF]/.test(text) ? "ur" : "en");
+
+      return {
+        text,
+        language: detectedLang,
+        confidence: 0.92,
+      };
+    } catch (err: any) {
+      lastError = err;
+      console.warn(
+        `⚠️ Gemini transcription (${keyLabel}) failed: ${err.message?.slice(0, 80)}`,
+      );
+      if (i < allKeys.length - 1) {
+        console.log("   Trying next API key...");
+      }
+    }
+  }
+
+  throw (
+    lastError || new Error("Audio transcription failed for all Gemini API keys")
+  );
 }
 
 /**
- * Batch transcribe multiple audio files (useful for long recordings split into chunks)
- * @param audioChunks Array of audio buffers
- * @returns Combined transcription
+ * Batch transcribe multiple audio chunks.
  */
 export async function transcribeAudioChunks(
   audioChunks: (Buffer | Uint8Array)[],
@@ -98,20 +197,15 @@ export async function transcribeAudioChunks(
   const combinedText = results.map((r) => r.text).join(" ");
   const detectedLanguage = results[0]?.language || language || "unknown";
 
-  console.log(
-    `✅ Batch transcription complete: ${results.length} chunks, ${combinedText.length} chars`,
-  );
-
   return {
     text: combinedText.trim(),
     language: detectedLanguage,
-    confidence: 0.95,
+    confidence: 0.92,
   };
 }
 
 /**
- * Detect language of audio file
- * Returns: 'ur' for Urdu, 'en' for English, or detected language code
+ * Detect language of audio by transcribing a small sample.
  */
 export async function detectAudioLanguage(
   audioBuffer: Buffer | Uint8Array,
@@ -119,41 +213,18 @@ export async function detectAudioLanguage(
   try {
     const result = await transcribeAudio(audioBuffer);
     return result.language;
-  } catch (error) {
-    console.warn("Language detection failed, defaulting to 'unknown'");
+  } catch {
     return "unknown";
   }
 }
 
 /**
- * Transcribe audio with language-specific handling
- * For Urdu: uses language hint for better accuracy
- * For English: uses standard Whisper
+ * Transcribe audio with explicit language handling.
  */
 export async function transcribeAudioByLanguage(
   audioBuffer: Buffer | Uint8Array,
   language: "ur" | "en" | "auto" = "auto",
 ): Promise<TranscriptionResult> {
-  const langMap: Record<string, string> = {
-    ur: "Urdu",
-    en: "English",
-    auto: "automatic",
-  };
-
-  console.log(
-    `🎤 Transcribing with language: ${langMap[language] || language}`,
-  );
-
-  try {
-    // For Urdu, we could add language-specific preprocessing here
-    if (language === "ur") {
-      console.log("   (Urdu-optimized transcription)");
-    }
-
-    const result = await transcribeAudio(audioBuffer, language);
-    return result;
-  } catch (error: any) {
-    console.error(`Audio transcription error: ${error.message}`);
-    throw error;
-  }
+  const lang = language === "auto" ? undefined : language;
+  return transcribeAudio(audioBuffer, lang);
 }
