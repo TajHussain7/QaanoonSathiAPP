@@ -1,9 +1,10 @@
-@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Noto+Nastaliq+Urdu&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Noto+Nastaliq+Urdu:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800;900&display=swap");
 @import "tailwindcss";
 
 @theme {
   --font-law: "Cinzel", serif;
   --font-urdu: "Noto Nastaliq Urdu", serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
 /* Base body styles */
@@ -11,6 +12,7 @@ body {
   background-color: #fdfbf7;
   color: #2c2621;
   font-family:
+    "Inter",
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -19,7 +21,6 @@ body {
     Roboto,
     "Helvetica Neue",
     Arial,
-    "Noto Sans",
     sans-serif;
   margin: 0;
   height: 100vh;
@@ -78,6 +79,7 @@ body {
 
 .font-urdu {
   font-family: "Noto Nastaliq Urdu", serif;
+  line-height: 2;
 }
 
 /* Professional Soft Glass Effects */
@@ -93,39 +95,46 @@ body {
   box-shadow: -10px 0 20px -10px rgba(166, 138, 86, 0.3);
 }
 
-/* Markdown Rendering */
+/* ── Markdown Rendering ─────────────────────────────────────── */
+.markdown-body {
+  font-size: inherit;
+  line-height: 1.85;
+  color: #2c2621;
+}
+
 .markdown-body h1 {
-  @apply text-4xl font-black mb-6 mt-8 text-[#2C2621];
+  @apply text-2xl font-black mb-5 mt-7 text-[#065016] border-b border-[#065016]/10 pb-2;
 }
 .markdown-body h2 {
-  @apply text-3xl font-black mb-4 mt-6 text-[#2C2621];
+  @apply text-xl font-black mb-4 mt-6 text-[#065016];
 }
 .markdown-body h3 {
-  @apply text-2xl font-black mb-3 mt-4 text-[#2C2621];
+  @apply text-lg font-bold mb-3 mt-4 text-[#065016];
 }
 .markdown-body p {
-  @apply mb-6 leading-[1.8];
+  @apply mb-4 leading-[1.85];
 }
-.markdown-body strong {
-  @apply font-black text-[#2C2621];
+.markdown-body strong,
+.markdown-body b {
+  @apply font-bold text-[#065016];
 }
 .markdown-body ul {
-  @apply list-disc list-inside mb-6 space-y-2;
+  @apply list-disc list-outside mb-5 space-y-1.5 ml-5;
 }
 .markdown-body ol {
-  @apply list-decimal list-inside mb-6 space-y-2;
+  @apply list-decimal list-outside mb-5 space-y-1.5 ml-5;
 }
 .markdown-body li {
   @apply leading-relaxed;
 }
 .markdown-body blockquote {
-  @apply border-l-4 border-[#A68A56] pl-6 py-2 italic mb-6 bg-[#A68A56]/5 rounded-r-2xl;
+  @apply border-l-4 border-[#A68A56] pl-5 py-2 italic mb-5 bg-[#A68A56]/5 rounded-r-xl text-[#2C2621]/70;
 }
 .markdown-body code {
-  @apply px-2 py-1 bg-[#2C2621]/5 rounded font-mono text-sm;
+  @apply px-2 py-0.5 bg-[#2C2621]/5 rounded font-mono text-sm;
 }
 
-/* Enhanced RTL and Urdu Text Support */
+/* ── RTL & Urdu Support ─────────────────────────────────────── */
 .rtl {
   direction: rtl;
   text-align: right;
@@ -135,17 +144,18 @@ body {
   font-family: "Noto Nastaliq Urdu", "Segoe UI", sans-serif;
   direction: rtl;
   text-align: right;
-  line-height: 2;
-  font-size: 1.1rem;
+  line-height: 2.2;
+  font-size: 1.15rem;
   word-spacing: 0.1em;
-  letter-spacing: 0.05em;
 }
 
-/* Markdown body for Urdu content */
+/* Markdown for Urdu content */
 .markdown-body.urdu {
   direction: rtl;
   text-align: right;
   font-family: "Noto Nastaliq Urdu", "Segoe UI", sans-serif;
+  font-size: 1.15rem;
+  line-height: 2.2;
 }
 
 .markdown-body.urdu strong,
@@ -157,13 +167,103 @@ body {
 .markdown-body.urdu ul,
 .markdown-body.urdu ol {
   margin-right: 1.5rem;
-  margin-left: auto;
+  margin-left: 0;
+  text-align: right;
+}
+
+.markdown-body.urdu li {
+  text-align: right;
 }
 
 .markdown-body.urdu blockquote {
   border-right: 4px solid #a68a56;
   border-left: none;
-  padding-right: 1.5rem;
+  padding-right: 1.25rem;
   padding-left: 0;
   text-align: right;
+}
+
+.markdown-body.urdu p {
+  text-align: right;
+}
+
+/* ── Disclaimer highlight block ─────────────────────────────── */
+.disclaimer-block {
+  background-color: rgba(166, 138, 86, 0.06);
+  border: 1px solid rgba(166, 138, 86, 0.22);
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-top: 1.5rem;
+}
+
+.disclaimer-block .bar {
+  width: 3px;
+  align-self: stretch;
+  background-color: #a68a56;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.disclaimer-block p {
+  color: #a68a56;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-style: italic;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ── Urdu Keyboard ──────────────────────────────────────────── */
+.urdu-keyboard-key {
+  font-family: "Noto Nastaliq Urdu", serif;
+  font-size: 1rem;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(6, 80, 22, 0.12);
+  background: #fdfbf7;
+  color: #065016;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    transform 0.1s;
+  user-select: none;
+}
+
+.urdu-keyboard-key:hover {
+  background: #065016;
+  color: #fff;
+}
+
+.urdu-keyboard-key:active {
+  transform: scale(0.92);
+}
+
+/* ── Dashboard chat bubbles ─────────────────────────────────── */
+.chat-bubble-user {
+  background: rgba(6, 80, 22, 0.07);
+  border-radius: 1rem 1rem 0.25rem 1rem;
+  padding: 0.75rem 1rem;
+}
+
+.chat-bubble-ai {
+  background: #fdfbf7;
+  border: 1px solid rgba(6, 80, 22, 0.08);
+  border-radius: 1rem 1rem 1rem 0.25rem;
+  padding: 0.75rem 1rem;
+}
+
+/* ── Bounce delay utilities ─────────────────────────────────── */
+.delay-100 {
+  animation-delay: 0.1s;
+}
+.delay-200 {
+  animation-delay: 0.2s;
 }

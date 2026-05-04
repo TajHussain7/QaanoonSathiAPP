@@ -1,6 +1,6 @@
-import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { X, ExternalLink, FileText } from 'lucide-react';
+import React from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { X, ExternalLink, BookOpen, Scale } from "lucide-react";
 
 interface SourceModalProps {
   isOpen: boolean;
@@ -9,8 +9,20 @@ interface SourceModalProps {
   lang: string;
 }
 
-const SourceModal: React.FC<SourceModalProps> = ({ isOpen, onClose, source, lang }) => {
+const SourceModal: React.FC<SourceModalProps> = ({
+  isOpen,
+  onClose,
+  source,
+  lang,
+}) => {
   if (!source) return null;
+
+  const isRtl = lang === "ur";
+
+  const handleSearchOnline = () => {
+    const q = encodeURIComponent(source.source + " Pakistan Law legislation");
+    window.open(`https://www.google.com/search?q=${q}`, "_blank");
+  };
 
   return (
     <AnimatePresence>
@@ -27,74 +39,93 @@ const SourceModal: React.FC<SourceModalProps> = ({ isOpen, onClose, source, lang
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-2xl bg-white rounded-[2.5rem] shadow-2xl z-[101] overflow-hidden border border-[#A68A56]/20"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-white rounded-[2rem] shadow-2xl z-[101] overflow-hidden border border-[#A68A56]/20"
+            dir={isRtl ? "rtl" : "ltr"}
           >
-            <div className="p-8 flex justify-between items-center border-b border-[#2C2621]/5">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-[#A68A56]/10 flex items-center justify-center text-[#A68A56]">
-                  <FileText size={24} />
+            {/* Header */}
+            <div className="bg-[#065016] px-8 py-6 flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white">
+                  <Scale size={20} />
                 </div>
                 <div>
-                  <h3 className="text-xl font-black text-[#2C2621] uppercase tracking-tighter">
-                    {lang === 'ur' ? 'قانونی ماخذ' : 'Legal Source'}
+                  <h3
+                    className={`text-lg font-black text-white tracking-tight ${isRtl ? "font-urdu" : ""}`}
+                  >
+                    {isRtl ? "قانونی ماخذ" : "Legal Source"}
                   </h3>
-                  <p className="text-[10px] text-[#A68A56] font-black uppercase tracking-widest">
-                    Verified Documentation
+                  <p className="text-white/60 text-[10px] font-semibold uppercase tracking-widest">
+                    {isRtl ? "تصدیق شدہ دستاویز" : "Verified Documentation"}
                   </p>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={onClose}
-                className="p-3 hover:bg-[#2C2621]/5 rounded-full transition-colors text-[#2C2621]/40 hover:text-[#2C2621]"
+                className="p-2 hover:bg-white/10 rounded-full transition-colors text-white/70 hover:text-white"
               >
-                <X size={24} />
+                <X size={22} />
               </button>
             </div>
 
-            <div className="p-10">
-              <div className="mb-8">
-                <span className="text-[10px] font-black text-[#A68A56] uppercase tracking-[0.3em] block mb-2">
-                  {lang === 'ur' ? 'دستاویز کا نام' : 'Document Name'}
+            {/* Body */}
+            <div className="p-8">
+              {/* Document Name */}
+              <div className="mb-6">
+                <span
+                  className={`text-[10px] font-black text-[#A68A56] uppercase tracking-[0.3em] block mb-2 ${isRtl ? "text-right" : ""}`}
+                >
+                  {isRtl ? "دستاویز کا نام" : "Document Name"}
                 </span>
-                <h4 className={`text-2xl font-bold text-[#2C2621] ${lang === 'ur' ? 'font-urdu' : ''}`}>
-                  {source.source}
-                </h4>
+                <div className="flex items-start gap-3 p-4 bg-[#FDFBF7] rounded-xl border border-[#065016]/10">
+                  <BookOpen
+                    size={18}
+                    className="text-[#065016]/40 flex-shrink-0 mt-0.5"
+                  />
+                  <h4
+                    className={`text-lg font-bold text-[#2C2621] leading-snug ${isRtl ? "font-urdu text-right" : ""}`}
+                  >
+                    {source.source}
+                  </h4>
+                </div>
               </div>
 
+              {/* Relevant Section */}
               {source.section && (
                 <div className="mb-8">
-                  <span className="text-[10px] font-black text-[#A68A56] uppercase tracking-[0.3em] block mb-2">
-                    {lang === 'ur' ? 'سیکشن / حصہ' : 'Relevant Section'}
+                  <span
+                    className={`text-[10px] font-black text-[#A68A56] uppercase tracking-[0.3em] block mb-2 ${isRtl ? "text-right" : ""}`}
+                  >
+                    {isRtl ? "متعلقہ حصہ" : "Relevant Section"}
                   </span>
-                  <div className="p-6 bg-[#FDFBF7] rounded-2xl border border-[#A68A56]/10">
-                    <p className={`text-[#2C2621]/70 leading-relaxed ${lang === 'ur' ? 'font-urdu text-lg' : 'font-serif'}`}>
+                  <div className="p-5 bg-[#FDFBF7] rounded-xl border-l-4 border-[#A68A56]">
+                    <p
+                      className={`text-[#2C2621]/70 leading-relaxed text-sm ${isRtl ? "font-urdu text-lg text-right" : "font-serif italic"}`}
+                      dir={isRtl ? "rtl" : "ltr"}
+                    >
                       {source.section}
                     </p>
                   </div>
                 </div>
               )}
 
-              <div className="flex gap-4">
-                <a 
-                  href={`/api/source/download?name=${encodeURIComponent(source.source)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1 py-4 bg-[#2C2621] text-white rounded-2xl font-black uppercase tracking-widest text-[12px] flex items-center justify-center gap-2 hover:bg-[#A68A56] transition-all shadow-xl"
-                >
-                  <FileText size={16} />
-                  {lang === 'ur' ? 'پی ڈی ایف دیکھیں' : 'View Full PDF'}
-                </a>
-                <button 
-                  onClick={() => window.open(`https://www.google.com/search?q=${encodeURIComponent(source.source + " Pakistan Law")}`, '_blank')}
-                  className="px-6 py-4 border-2 border-[#2C2621] text-[#2C2621] rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-[#2C2621] hover:text-white transition-all flex items-center gap-2"
-                >
-                  <ExternalLink size={16} />
-                  {lang === 'ur' ? 'آن لائن تلاش کریں' : 'Search Online'}
-                </button>
-              </div>
+              {/* Search Online Button (only) */}
+              <button
+                onClick={handleSearchOnline}
+                className="w-full py-4 bg-[#065016] text-white rounded-xl font-bold text-sm hover:bg-[#065016]/90 transition-all flex items-center justify-center gap-2.5 shadow-md active:scale-95"
+              >
+                <ExternalLink size={18} />
+                {isRtl ? "آن لائن تلاش کریں" : "Search Online"}
+              </button>
+
+              <p className="text-center text-[#2C2621]/30 text-[10px] mt-4 font-medium">
+                {isRtl
+                  ? "گوگل سرچ کے ذریعے متعلقہ قانونی نتائج دیکھیں"
+                  : "Opens relevant Pakistan law results in your browser"}
+              </p>
             </div>
 
-            <div className="bg-[#FDFBF7] p-6 text-center border-t border-[#2C2621]/5">
+            {/* Footer */}
+            <div className="bg-[#FDFBF7] px-8 py-4 border-t border-[#2C2621]/5 text-center">
               <p className="text-[9px] text-[#A68A56] font-black uppercase tracking-[0.5em]">
                 Authenticity Guaranteed by Qaanoon Sathi Intelligence
               </p>
