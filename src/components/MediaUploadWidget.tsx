@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from "motion/react";
 import { apiCall } from "../services/apiClient";
 import {
   Mic,
-  MicOff,
   Camera,
   FileText,
   X,
@@ -18,6 +17,7 @@ import {
   Volume2,
   Image,
   File,
+  Info,
 } from "lucide-react";
 
 interface MediaUploadWidgetProps {
@@ -37,13 +37,13 @@ interface ExtractedMedia {
 interface ProcessingError {
   title: string;
   message: string;
-  details?: string;
+  detail?: string;
   suggestion?: string;
 }
 
 type TabType = "voice" | "media";
 
-// ─── Voice Recorder Component ─────────────────────────────────────────────────
+// ─── Voice Recorder ───────────────────────────────────────────────────────────
 const VoiceRecorder: React.FC<{
   selectedLanguage: "ur" | "en";
   onLanguageChange: (lang: "ur" | "en") => void;
@@ -65,7 +65,6 @@ const VoiceRecorder: React.FC<{
   const [transcript, setTranscript] = useState<string | null>(null);
   const [processingError, setProcessingError] =
     useState<ProcessingError | null>(null);
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -74,7 +73,6 @@ const VoiceRecorder: React.FC<{
   const startRecording = async () => {
     setTranscript(null);
     setProcessingError(null);
-    setAudioBlob(null);
     chunksRef.current = [];
 
     try {
@@ -95,8 +93,7 @@ const VoiceRecorder: React.FC<{
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(chunksRef.current, { type: mimeType });
-        setAudioBlob(blob);
-        await transcribeAudio(blob);
+        await transcribeAudio(blob, mimeType);
       };
 
       recorder.start(200);
@@ -104,15 +101,20 @@ const VoiceRecorder: React.FC<{
       setIsPaused(false);
       setRecordingDuration(0);
 
-      timerRef.current = setInterval(() => {
-        setRecordingDuration((d) => d + 1);
-      }, 1000);
+      timerRef.current = setInterval(
+        () => setRecordingDuration((d) => d + 1),
+        1000,
+      );
     } catch (err: any) {
       const msg =
         err.name === "NotAllowedError"
-          ? "Microphone access denied. Please allow microphone in browser settings."
+          ? "Microphone access denied. Please allow microphone permission in your browser settings."
           : err.message || "Could not access microphone.";
-      setProcessingError({ title: "Microphone Error", message: msg });
+      setProcessingError({
+        title: "Microphone Error",
+        message: msg,
+        suggestion: "Check browser permissions and try again.",
+      });
       onError(msg);
     }
   };
@@ -127,28 +129,27 @@ const VoiceRecorder: React.FC<{
   };
 
   const pauseRecording = () => {
-    if (mediaRecorderRef.current) {
-      if (isPaused) {
-        mediaRecorderRef.current.resume();
-        timerRef.current = setInterval(
-          () => setRecordingDuration((d) => d + 1),
-          1000,
-        );
-      } else {
-        mediaRecorderRef.current.pause();
-        if (timerRef.current) clearInterval(timerRef.current);
-      }
-      setIsPaused(!isPaused);
+    if (!mediaRecorderRef.current) return;
+    if (isPaused) {
+      mediaRecorderRef.current.resume();
+      timerRef.current = setInterval(
+        () => setRecordingDuration((d) => d + 1),
+        1000,
+      );
+    } else {
+      mediaRecorderRef.current.pause();
+      if (timerRef.current) clearInterval(timerRef.current);
     }
+    setIsPaused(!isPaused);
   };
 
-  const transcribeAudio = async (blob: Blob) => {
+  const transcribeAudio = async (blob: Blob, mimeType: string) => {
     setIsProcessing(true);
     setStatusMessage("Transcribing your voice...");
 
     try {
+      const ext = mimeType.includes("webm") ? "webm" : "ogg";
       const formData = new FormData();
-      const ext = blob.type.includes("webm") ? "webm" : "ogg";
       formData.append("audio", blob, `recording.${ext}`);
       formData.append("language", selectedLanguage);
 
@@ -157,17 +158,19 @@ const VoiceRecorder: React.FC<{
         body: formData,
       });
 
+      const result = await response.json();
+
       if (!response.ok) {
-        const errData = await response.json();
         throw new Error(
-          errData.message || `Transcription failed (${response.status})`,
+          result.message ||
+            result.error ||
+            `Transcription failed (${response.status})`,
         );
       }
 
-      const result = await response.json();
       if (!result.text || result.text.trim().length === 0) {
         throw new Error(
-          "No speech detected. Please try speaking more clearly.",
+          "No speech detected. Please speak clearly and try again.",
         );
       }
 
@@ -183,18 +186,19 @@ const VoiceRecorder: React.FC<{
       setProcessingError({
         title: "Transcription Failed",
         message: msg,
-        suggestion: "Speak clearly and ensure your microphone is working.",
+        suggestion:
+          "Ensure your microphone is working and speak clearly. If using Urdu, select the Urdu language option.",
       });
       onError(msg);
     } finally {
       setIsProcessing(false);
+      setStatusMessage("");
     }
   };
 
   const reset = () => {
     setTranscript(null);
     setProcessingError(null);
-    setAudioBlob(null);
     setStatusMessage("");
     setRecordingDuration(0);
   };
@@ -231,8 +235,8 @@ const VoiceRecorder: React.FC<{
         </div>
       </div>
 
-      {/* Recording UI */}
       <AnimatePresence mode="wait">
+        {/* Default / Recording state */}
         {!transcript && !processingError && !isProcessing && (
           <motion.div
             key="record"
@@ -241,11 +245,10 @@ const VoiceRecorder: React.FC<{
             exit={{ opacity: 0, y: -5 }}
             className="flex flex-col items-center gap-4 py-6"
           >
-            {/* Big record button */}
             <div className="relative">
               {isRecording && (
                 <motion.div
-                  animate={{ scale: [1, 1.3, 1] }}
+                  animate={{ scale: [1, 1.35, 1] }}
                   transition={{ repeat: Infinity, duration: 1.5 }}
                   className="absolute inset-0 bg-red-500/20 rounded-full"
                 />
@@ -267,7 +270,6 @@ const VoiceRecorder: React.FC<{
               </button>
             </div>
 
-            {/* Status */}
             {isRecording ? (
               <div className="flex flex-col items-center gap-2">
                 <div className="flex items-center gap-2">
@@ -306,7 +308,7 @@ const VoiceRecorder: React.FC<{
           </motion.div>
         )}
 
-        {/* Processing */}
+        {/* Processing state */}
         {isProcessing && (
           <motion.div
             key="processing"
@@ -319,12 +321,12 @@ const VoiceRecorder: React.FC<{
               <Loader size={24} className="text-[#065016] animate-spin" />
             </div>
             <p className="text-sm font-semibold text-[#065016]/60">
-              {statusMessage || "Processing..."}
+              {statusMessage || "Processing…"}
             </p>
           </motion.div>
         )}
 
-        {/* Success */}
+        {/* Success state */}
         {transcript && !processingError && (
           <motion.div
             key="success"
@@ -339,7 +341,7 @@ const VoiceRecorder: React.FC<{
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-black text-[#065016] uppercase tracking-widest mb-1.5">
-                  Transcribed
+                  Transcribed — Sending as query…
                 </p>
                 <p
                   className="text-sm text-[#2C2621] leading-relaxed bg-white rounded-lg p-3 border border-[#065016]/10"
@@ -359,7 +361,7 @@ const VoiceRecorder: React.FC<{
           </motion.div>
         )}
 
-        {/* Error */}
+        {/* Error state */}
         {processingError && (
           <motion.div
             key="error"
@@ -377,9 +379,14 @@ const VoiceRecorder: React.FC<{
                 <p className="text-sm font-bold text-red-800 mb-1">
                   {processingError.title}
                 </p>
-                <p className="text-xs text-red-700 mb-2">
+                <p className="text-xs text-red-700 mb-1">
                   {processingError.message}
                 </p>
+                {processingError.detail && (
+                  <p className="text-[10px] text-red-600/70 mb-2 font-mono bg-red-100 px-2 py-1 rounded">
+                    {processingError.detail}
+                  </p>
+                )}
                 {processingError.suggestion && (
                   <p className="text-xs text-red-600 bg-red-100 px-3 py-2 rounded-lg mb-3">
                     💡 {processingError.suggestion}
@@ -400,7 +407,7 @@ const VoiceRecorder: React.FC<{
   );
 };
 
-// ─── Media Upload Component ────────────────────────────────────────────────────
+// ─── Media Upload ─────────────────────────────────────────────────────────────
 const MediaUpload: React.FC<{
   selectedLanguage: "ur" | "en";
   onLanguageChange: (lang: "ur" | "en") => void;
@@ -433,7 +440,10 @@ const MediaUpload: React.FC<{
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      "image/*": [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"],
+      "image/jpeg": [".jpg", ".jpeg"],
+      "image/png": [".png"],
+      "image/webp": [".webp"],
+      "image/gif": [".gif"],
       "application/pdf": [".pdf"],
     },
     disabled: isProcessing || disabled,
@@ -456,24 +466,31 @@ const MediaUpload: React.FC<{
         body: formData,
       });
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(
-          errData.message || `Upload failed (${response.status})`,
-        );
-      }
-
+      // Always parse the response body
       const result = await response.json();
+
+      if (!response.ok) {
+        // Show the most specific error message available
+        const primaryMsg =
+          result.message ||
+          result.error ||
+          `Upload failed (HTTP ${response.status})`;
+        const detailMsg =
+          result.error !== result.message ? result.error : undefined;
+
+        throw Object.assign(new Error(primaryMsg), { detail: detailMsg });
+      }
 
       if (!result.text || result.text.trim().length === 0) {
         throw new Error(
-          "No text found in this file. Please check the file and try again.",
+          "No readable text found in this file. Please try a clearer image or a text-based PDF.",
         );
       }
 
       const mediaType: "image" | "pdf" = file.type.includes("pdf")
         ? "pdf"
         : "image";
+
       const extracted: ExtractedMedia = {
         text: result.text,
         mediaType,
@@ -493,14 +510,18 @@ const MediaUpload: React.FC<{
       }, 800);
     } catch (err: any) {
       const msg = err.message || "Failed to process file.";
+      const detail = err.detail;
       setProcessingError({
         title: "Processing Failed",
         message: msg,
-        suggestion: "Ensure the file is not corrupted and is under 25MB.",
+        detail,
+        suggestion:
+          "Ensure the file is a clear image (JPG/PNG/WebP) or a digital PDF, not a scanned document. File must be under 25MB.",
       });
       onError(msg);
     } finally {
       setIsProcessing(false);
+      setProcessingStatus("");
     }
   };
 
@@ -537,11 +558,7 @@ const MediaUpload: React.FC<{
       {/* Drop Zone */}
       <AnimatePresence>
         {!extractedText && !processingError && (
-          <motion.div
-            initial={{ opacity: 1 }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2 }}
-          >
+          <motion.div initial={{ opacity: 1 }} exit={{ opacity: 0, height: 0 }}>
             <div
               {...getRootProps()}
               className={`relative p-8 border-2 border-dashed rounded-xl transition-all cursor-pointer
@@ -558,7 +575,6 @@ const MediaUpload: React.FC<{
                   <Image size={28} />
                   <File size={28} />
                 </div>
-
                 {isProcessing ? (
                   <div className="flex items-center gap-2">
                     <Loader size={18} className="animate-spin text-[#065016]" />
@@ -574,7 +590,7 @@ const MediaUpload: React.FC<{
                         : "Drag image or PDF here, or click to browse"}
                     </p>
                     <p className="text-xs text-[#065016]/30 mt-1">
-                      JPG, PNG, WEBP, PDF — up to 25MB
+                      JPG, PNG, WebP, GIF, PDF — up to 25MB
                     </p>
                   </div>
                 )}
@@ -600,17 +616,14 @@ const MediaUpload: React.FC<{
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap mb-1">
                   <span className="text-xs font-black text-[#065016] uppercase tracking-widest">
-                    Text Extracted
+                    Text Extracted — Sending as query…
                   </span>
                   <span className="text-[10px] px-2 py-0.5 bg-[#065016] text-white rounded-full font-bold">
                     {extractedText.mediaType.toUpperCase()}
                   </span>
-                  <span className="text-[10px] text-[#065016]/40 ml-auto">
-                    {extractedText.text.length} chars
-                  </span>
                 </div>
                 <p className="text-xs text-[#065016]/40 mb-2">
-                  {extractedText.fileName} •{" "}
+                  {extractedText.fileName} • {extractedText.text.length} chars •{" "}
                   {extractedText.language === "ur" ? "اردو" : "English"}
                 </p>
                 <div
@@ -646,13 +659,18 @@ const MediaUpload: React.FC<{
                 size={18}
                 className="text-red-600 flex-shrink-0 mt-0.5"
               />
-              <div>
+              <div className="flex-1">
                 <p className="text-sm font-bold text-red-800 mb-1">
                   {processingError.title}
                 </p>
-                <p className="text-xs text-red-700 mb-2">
+                <p className="text-xs text-red-700 mb-1">
                   {processingError.message}
                 </p>
+                {processingError.detail && (
+                  <p className="text-[10px] text-red-600/70 mb-2 font-mono bg-red-100 px-2 py-1 rounded break-all">
+                    Detail: {processingError.detail}
+                  </p>
+                )}
                 {processingError.suggestion && (
                   <p className="text-xs text-red-600 bg-red-100 px-3 py-2 rounded-lg mb-3">
                     💡 {processingError.suggestion}
@@ -685,34 +703,33 @@ const MediaUploadWidget: React.FC<MediaUploadWidgetProps> = ({
 
   return (
     <div className="border border-[#065016]/15 rounded-2xl overflow-hidden bg-white shadow-sm">
-      {/* Widget header / toggle */}
+      {/* Widget toggle header */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full flex items-center justify-between px-5 py-3.5 bg-[#065016]/[0.03] hover:bg-[#065016]/[0.06] transition-colors"
       >
         <div className="flex items-center gap-2.5">
           <div className="flex gap-1.5">
-            <div
-              className={`w-2 h-2 rounded-full transition-colors ${activeTab === "voice" && isExpanded ? "bg-red-400 animate-pulse" : "bg-[#065016]/20"}`}
-            />
+            <Mic size={14} className="text-[#065016]/40" />
+            <Camera size={14} className="text-[#065016]/40" />
+            <FileText size={14} className="text-[#065016]/40" />
           </div>
-          <span className="text-[11px] font-black text-[#065016]/60 uppercase tracking-widest">
+          <span className="text-[11px] font-black text-[#065016]/50 uppercase tracking-widest">
             Voice & Media Input
           </span>
         </div>
-        <div
-          className={`w-5 h-5 rounded-md bg-[#065016]/10 flex items-center justify-center text-[#065016]/50 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+        <svg
+          width="10"
+          height="6"
+          viewBox="0 0 10 6"
+          className={`text-[#065016]/40 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
         >
-          <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor">
-            <path
-              d="M1 1L5 5L9 1"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              fill="none"
-              strokeLinecap="round"
-            />
-          </svg>
-        </div>
+          <path d="M1 1L5 5L9 1" />
+        </svg>
       </button>
 
       {/* Collapsible content */}
@@ -757,9 +774,9 @@ const MediaUploadWidget: React.FC<MediaUploadWidgetProps> = ({
                 {activeTab === "voice" ? (
                   <motion.div
                     key="voice"
-                    initial={{ opacity: 0, x: -10 }}
+                    initial={{ opacity: 0, x: -8 }}
                     animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 10 }}
+                    exit={{ opacity: 0, x: 8 }}
                     transition={{ duration: 0.15 }}
                   >
                     <VoiceRecorder
@@ -773,9 +790,9 @@ const MediaUploadWidget: React.FC<MediaUploadWidgetProps> = ({
                 ) : (
                   <motion.div
                     key="media"
-                    initial={{ opacity: 0, x: 10 }}
+                    initial={{ opacity: 0, x: 8 }}
                     animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -10 }}
+                    exit={{ opacity: 0, x: -8 }}
                     transition={{ duration: 0.15 }}
                   >
                     <MediaUpload
@@ -789,11 +806,18 @@ const MediaUploadWidget: React.FC<MediaUploadWidgetProps> = ({
                 )}
               </AnimatePresence>
 
-              {/* Disclaimer */}
-              <p className="text-[10px] text-[#065016]/25 text-center mt-4 font-medium">
-                Audio and media are processed securely and not stored
-                permanently.
-              </p>
+              {/* Info note */}
+              <div className="flex items-start gap-2 mt-4 p-3 bg-[#065016]/[0.03] rounded-lg">
+                <Info
+                  size={13}
+                  className="text-[#065016]/30 flex-shrink-0 mt-0.5"
+                />
+                <p className="text-[10px] text-[#065016]/30 font-medium leading-relaxed">
+                  Uploaded files and voice recordings are processed securely and
+                  not stored permanently. For best results, use clear images and
+                  digital PDFs.
+                </p>
+              </div>
             </div>
           </motion.div>
         )}
