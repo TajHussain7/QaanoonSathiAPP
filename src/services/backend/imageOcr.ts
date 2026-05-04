@@ -1,50 +1,42 @@
 /**
  * Image OCR Service
- * Extracts text from images using Google Gemini Vision API
+ * Extracts text from images using Google Gemini Vision via @google/genai SDK
  * Supports: JPG, PNG, WebP, BMP, GIF
  * Languages: Urdu, English
  *
- * Switched from HuggingFace (naver-clova-ix/donut-base and
- * microsoft/trocr-large-printed removed from free inference) to
- * Gemini Flash Vision which already has working API keys in this project.
+ * Uses getGenAIClient() (same SDK as llmService.ts) instead of raw v1beta REST
+ * calls, which caused "model not found for API version v1beta" errors with
+ * Google Cloud Console API keys.
  */
 
-import { getAllGeminiApiKeys } from "./utils.js";
+import { getGenAIClient, getAllGeminiApiKeys } from "./utils.js";
 
 export interface OCRResult {
   text: string;
   language: string;
   confidence: number;
-  method: "hf-api" | "tesseract"; // kept for interface compatibility
+  method: "hf-api" | "tesseract"; // preserved for interface compatibility
 }
 
-const GEMINI_API_ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/models";
-const VISION_MODEL = "gemini-1.5-flash";
+// Use the same stable model available to paid Google Cloud keys
+const VISION_MODEL = "gemini-2.0-flash";
 
 /**
  * Detect image MIME type from buffer magic bytes.
- * Uses Buffer.isBuffer() to avoid the TypeScript narrowing-to-never issue
- * that occurs when checking `instanceof Uint8Array` (Buffer extends Uint8Array).
+ * Uses Buffer.isBuffer() to avoid TypeScript narrowing-to-never issue
+ * (Buffer extends Uint8Array, so instanceof Uint8Array is always true).
  */
 function detectImageMimeType(buffer: Buffer | Uint8Array): string {
-  // Always work with a proper Buffer so index access is type-safe
   const b: Buffer = Buffer.isBuffer(buffer)
     ? buffer
     : Buffer.from(buffer as Uint8Array);
 
-  // JPEG: FF D8 FF
-  if (b[0] === 0xff && b[1] === 0xd8) return "image/jpeg";
-  // PNG: 89 50 4E 47
-  if (b[0] === 0x89 && b[1] === 0x50) return "image/png";
-  // GIF: 47 49 46 38
-  if (b[0] === 0x47 && b[1] === 0x49) return "image/gif";
-  // WebP: RIFF....WEBP (bytes 0-1 = 52 49, bytes 8-9 = 57 45)
-  if (b[0] === 0x52 && b[1] === 0x49 && b.length > 9 && b[8] === 0x57) {
-    return "image/webp";
-  }
-  // BMP: 42 4D
-  if (b[0] === 0x42 && b[1] === 0x4d) return "image/bmp";
+  if (b[0] === 0xff && b[1] === 0xd8) return "image/jpeg"; // JPEG
+  if (b[0] === 0x89 && b[1] === 0x50) return "image/png"; // PNG
+  if (b[0] === 0x47 && b[1] === 0x49) return "image/gif"; // GIF
+  if (b.length > 9 && b[0] === 0x52 && b[1] === 0x49 && b[8] === 0x57)
+    return "image/webp"; // WebP
+  if (b[0] === 0x42 && b[1] === 0x4d) return "image/bmp"; // BMP
 
   return "image/jpeg"; // safest default for Gemini Vision
 }
@@ -57,18 +49,18 @@ function buildOcrPrompt(language: "ur" | "en"): string {
     return (
       "This document may contain Urdu or mixed Urdu/English text. " +
       "Extract ALL text visible in the image exactly as written, preserving Urdu script. " +
-      "Output only the extracted text with no commentary."
+      "Output only the extracted text — no commentary, no explanations."
     );
   }
   return (
     "Extract ALL text visible in this image exactly as written. " +
-    "Preserve formatting where possible. " +
-    "Output only the extracted text with no commentary."
+    "Preserve paragraphs and line breaks where possible. " +
+    "Output only the extracted text — no commentary, no explanations."
   );
 }
 
 /**
- * Extract text from an image using Gemini Vision.
+ * Extract text from image using Gemini Vision SDK.
  * Tries each API key with automatic fallback.
  */
 export async function extractTextFromImageHF(
@@ -78,70 +70,52 @@ export async function extractTextFromImageHF(
   const allKeys = getAllGeminiApiKeys();
   if (allKeys.length === 0) {
     throw new Error(
-      "No Gemini API keys found — set GEMINI_API_KEY in environment variables",
+      "No Gemini API keys found — set GEMINI_API_KEY in Render environment variables",
     );
   }
 
   const mimeType = detectImageMimeType(imageBuffer);
   const base64Image = Buffer.isBuffer(imageBuffer)
     ? imageBuffer.toString("base64")
-    : Buffer.from(imageBuffer).toString("base64");
+    : Buffer.from(imageBuffer as Uint8Array).toString("base64");
 
   const prompt = buildOcrPrompt(language);
 
   console.log(
-    `📸 OCR via Gemini Vision (${mimeType}, ${imageBuffer.length} bytes, lang: ${language})...`,
+    `📸 OCR via Gemini SDK (${VISION_MODEL}, ${mimeType}, ${imageBuffer.length} bytes, lang: ${language})...`,
   );
 
   let lastError: Error | null = null;
 
   for (let i = 0; i < allKeys.length; i++) {
-    const apiKey = allKeys[i];
     const keyLabel = i === 0 ? "Primary" : `Fallback ${i}`;
+    const client = getGenAIClient(allKeys[i]);
+
+    if (!client) {
+      console.warn(`⚠️ Could not create Gemini client for ${keyLabel} key`);
+      continue;
+    }
 
     try {
-      const url = `${GEMINI_API_ENDPOINT}/${VISION_MODEL}:generateContent?key=${apiKey}`;
-
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: prompt },
-                {
-                  inlineData: {
-                    mimeType,
-                    data: base64Image,
-                  },
+      const response = await client.models.generateContent({
+        model: VISION_MODEL,
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType,
+                  data: base64Image,
                 },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0,
-            maxOutputTokens: 4096,
+              },
+            ],
           },
-        }),
+        ],
       });
 
-      if (!response.ok) {
-        const errData = (await response.json().catch(() => ({}))) as any;
-        const msg = errData.error?.message || `HTTP ${response.status}`;
-
-        if (response.status === 429) {
-          throw new Error("Gemini rate limit — try again in a moment");
-        }
-        if (response.status === 401 || response.status === 403) {
-          throw new Error(`Invalid Gemini API key (${keyLabel})`);
-        }
-        throw new Error(msg);
-      }
-
-      const data = (await response.json()) as any;
-      const text =
-        data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+      const text = response.text?.trim() ?? "";
 
       if (!text || text.length === 0) {
         throw new Error(
@@ -150,28 +124,25 @@ export async function extractTextFromImageHF(
       }
 
       console.log(
-        `✅ Gemini OCR complete (${keyLabel}): ${text.length} chars, mime: ${mimeType}`,
+        `✅ Gemini OCR complete (${keyLabel}): ${text.length} chars, format: ${mimeType}`,
       );
 
       return {
         text,
         language,
         confidence: 0.92,
-        method: "hf-api", // preserved for interface compatibility
+        method: "hf-api",
       };
     } catch (err: any) {
       lastError = err;
-      console.warn(
-        `⚠️ Gemini OCR (${keyLabel}) failed: ${err.message?.slice(0, 80)}`,
-      );
-      if (i < allKeys.length - 1) {
-        console.log("   Trying next API key...");
-      }
+      const msg = err.message?.slice(0, 100) ?? String(err);
+      console.warn(`⚠️ Gemini OCR (${keyLabel}) failed: ${msg}`);
+      if (i < allKeys.length - 1) console.log("   Trying next API key...");
     }
   }
 
   throw (
-    lastError ||
+    lastError ??
     new Error(
       "Image text extraction failed for all Gemini API keys. Supported formats: JPG, PNG, WebP, GIF",
     )
@@ -179,7 +150,7 @@ export async function extractTextFromImageHF(
 }
 
 /**
- * Main OCR entry point — uses Gemini Vision.
+ * Main OCR entry point.
  */
 export async function extractTextFromImage(
   imageBuffer: Buffer | Uint8Array,
@@ -198,13 +169,11 @@ export async function extractTextFromImageStrict(
   minConfidence: number = 0.7,
 ): Promise<OCRResult> {
   const result = await extractTextFromImage(imageBuffer, language);
-
   if (result.confidence < minConfidence) {
     throw new Error(
       `OCR confidence too low (${result.confidence.toFixed(2)} < ${minConfidence}). Document quality may be poor.`,
     );
   }
-
   return result;
 }
 
