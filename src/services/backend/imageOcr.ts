@@ -1,15 +1,23 @@
 /**
  * Image OCR Service
- * Extracts text from images using Google Gemini Vision via @google/genai SDK
+ * Extracts text from images using OpenRouter vision models (OpenAI-compatible API)
+ *
+ * Why OpenRouter instead of Gemini:
+ *   - Gemini API key currently configured is not a valid Gemini key (starts AQ. not AIza...)
+ *   - OpenRouter provides free access to multiple capable vision models
+ *   - Automatic fallback across free models if one hits rate limits
+ *
+ * REQUIRED — add to Render environment variables:
+ *   OPENROUTER_API_KEY = your OpenRouter API key (from openrouter.ai)
+ *
+ * Free vision models used (in priority order):
+ *   1. google/gemini-2.0-flash-exp:free  — best for Urdu + English documents
+ *   2. meta-llama/llama-4-scout:free     — strong multilingual vision
+ *   3. qwen/qwen2.5-vl-72b-instruct:free — good for dense text / mixed scripts
+ *
  * Supports: JPG, PNG, WebP, BMP, GIF
  * Languages: Urdu, English
- *
- * Uses getGenAIClient() (same SDK as llmService.ts) instead of raw v1beta REST
- * calls, which caused "model not found for API version v1beta" errors with
- * Google Cloud Console API keys.
  */
-
-import { getGenAIClient, getAllGeminiApiKeys } from "./utils.js";
 
 export interface OCRResult {
   text: string;
@@ -18,59 +26,124 @@ export interface OCRResult {
   method: "hf-api" | "tesseract"; // preserved for interface compatibility
 }
 
-// Use the same stable model available to paid Google Cloud keys
-const VISION_MODEL = "gemini-2.0-flash";
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+// Free vision models in priority order (first available key wins)
+const VISION_MODELS = [
+  "google/gemini-2.0-flash-exp:free",
+  "meta-llama/llama-4-scout:free",
+  "qwen/qwen2.5-vl-72b-instruct:free",
+];
 
 /**
- * Detect image MIME type from buffer magic bytes.
- * Uses Buffer.isBuffer() to avoid TypeScript narrowing-to-never issue
- * (Buffer extends Uint8Array, so instanceof Uint8Array is always true).
+ * Detect image MIME type from magic bytes.
+ * Uses Buffer.isBuffer() to avoid TypeScript narrowing-to-never issue.
  */
 function detectImageMimeType(buffer: Buffer | Uint8Array): string {
   const b: Buffer = Buffer.isBuffer(buffer)
     ? buffer
     : Buffer.from(buffer as Uint8Array);
 
-  if (b[0] === 0xff && b[1] === 0xd8) return "image/jpeg"; // JPEG
-  if (b[0] === 0x89 && b[1] === 0x50) return "image/png"; // PNG
-  if (b[0] === 0x47 && b[1] === 0x49) return "image/gif"; // GIF
+  if (b[0] === 0xff && b[1] === 0xd8) return "image/jpeg";
+  if (b[0] === 0x89 && b[1] === 0x50) return "image/png";
+  if (b[0] === 0x47 && b[1] === 0x49) return "image/gif";
   if (b.length > 9 && b[0] === 0x52 && b[1] === 0x49 && b[8] === 0x57)
-    return "image/webp"; // WebP
-  if (b[0] === 0x42 && b[1] === 0x4d) return "image/bmp"; // BMP
+    return "image/webp";
+  if (b[0] === 0x42 && b[1] === 0x4d) return "image/bmp";
 
-  return "image/jpeg"; // safest default for Gemini Vision
+  return "image/jpeg";
 }
 
 /**
- * Build an OCR prompt appropriate for the language.
+ * Build OCR prompt for the target language.
  */
 function buildOcrPrompt(language: "ur" | "en"): string {
   if (language === "ur") {
     return (
-      "This document may contain Urdu or mixed Urdu/English text. " +
-      "Extract ALL text visible in the image exactly as written, preserving Urdu script. " +
-      "Output only the extracted text — no commentary, no explanations."
+      "This document contains Urdu or mixed Urdu/English text. " +
+      "Extract ALL visible text exactly as written, preserving Urdu script (Nastaliq). " +
+      "Output ONLY the extracted text — no commentary, no labels, no explanations."
     );
   }
   return (
     "Extract ALL text visible in this image exactly as written. " +
     "Preserve paragraphs and line breaks where possible. " +
-    "Output only the extracted text — no commentary, no explanations."
+    "Output ONLY the extracted text — no commentary, no labels, no explanations."
   );
 }
 
 /**
- * Extract text from image using Gemini Vision SDK.
- * Tries each API key with automatic fallback.
+ * Call OpenRouter vision API with a specific model.
+ */
+async function callOpenRouterVision(
+  apiKey: string,
+  model: string,
+  base64Image: string,
+  mimeType: string,
+  prompt: string,
+): Promise<string> {
+  const response = await fetch(OPENROUTER_API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://qaanoonsathi.onrender.com",
+      "X-Title": "QaanoonSathi Legal AI",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${mimeType};base64,${base64Image}`,
+              },
+            },
+          ],
+        },
+      ],
+      max_tokens: 4096,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(
+      `OpenRouter ${model} returned HTTP ${response.status}: ${body.slice(0, 200)}`,
+    );
+  }
+
+  const data = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    error?: { message?: string };
+  };
+
+  if (data.error?.message) {
+    throw new Error(`OpenRouter error: ${data.error.message}`);
+  }
+
+  const text = data.choices?.[0]?.message?.content?.trim() ?? "";
+  return text;
+}
+
+/**
+ * Extract text from image using OpenRouter vision models.
+ * Tries each free model in order; falls back if one hits rate limits.
  */
 export async function extractTextFromImageHF(
   imageBuffer: Buffer | Uint8Array,
   language: "ur" | "en" = "en",
 ): Promise<OCRResult> {
-  const allKeys = getAllGeminiApiKeys();
-  if (allKeys.length === 0) {
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+
+  if (!apiKey) {
     throw new Error(
-      "No Gemini API keys found — set GEMINI_API_KEY in Render environment variables",
+      "OPENROUTER_API_KEY is not set. " +
+        "Go to Render → Environment and add OPENROUTER_API_KEY with your key from openrouter.ai",
     );
   }
 
@@ -82,40 +155,23 @@ export async function extractTextFromImageHF(
   const prompt = buildOcrPrompt(language);
 
   console.log(
-    `📸 OCR via Gemini SDK (${VISION_MODEL}, ${mimeType}, ${imageBuffer.length} bytes, lang: ${language})...`,
+    `📸 OCR via OpenRouter (${mimeType}, ${imageBuffer.length} bytes, lang: ${language})...`,
   );
 
   let lastError: Error | null = null;
 
-  for (let i = 0; i < allKeys.length; i++) {
-    const keyLabel = i === 0 ? "Primary" : `Fallback ${i}`;
-    const client = getGenAIClient(allKeys[i]);
-
-    if (!client) {
-      console.warn(`⚠️ Could not create Gemini client for ${keyLabel} key`);
-      continue;
-    }
+  for (let i = 0; i < VISION_MODELS.length; i++) {
+    const model = VISION_MODELS[i];
 
     try {
-      const response = await client.models.generateContent({
-        model: VISION_MODEL,
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType,
-                  data: base64Image,
-                },
-              },
-            ],
-          },
-        ],
-      });
-
-      const text = response.text?.trim() ?? "";
+      console.log(`   Trying model: ${model}`);
+      const text = await callOpenRouterVision(
+        apiKey,
+        model,
+        base64Image,
+        mimeType,
+        prompt,
+      );
 
       if (!text || text.length === 0) {
         throw new Error(
@@ -124,7 +180,7 @@ export async function extractTextFromImageHF(
       }
 
       console.log(
-        `✅ Gemini OCR complete (${keyLabel}): ${text.length} chars, format: ${mimeType}`,
+        `✅ OCR complete (${model}): ${text.length} chars, format: ${mimeType}`,
       );
 
       return {
@@ -135,16 +191,19 @@ export async function extractTextFromImageHF(
       };
     } catch (err: any) {
       lastError = err;
-      const msg = err.message?.slice(0, 100) ?? String(err);
-      console.warn(`⚠️ Gemini OCR (${keyLabel}) failed: ${msg}`);
-      if (i < allKeys.length - 1) console.log("   Trying next API key...");
+      const msg = err.message?.slice(0, 120) ?? String(err);
+      console.warn(`⚠️ OCR model ${model} failed: ${msg}`);
+      if (i < VISION_MODELS.length - 1)
+        console.log("   Trying next vision model...");
     }
   }
 
   throw (
     lastError ??
     new Error(
-      "Image text extraction failed for all Gemini API keys. Supported formats: JPG, PNG, WebP, GIF",
+      "Image text extraction failed for all OpenRouter vision models. " +
+        "Supported formats: JPG, PNG, WebP, GIF. " +
+        "Check OPENROUTER_API_KEY on Render.",
     )
   );
 }

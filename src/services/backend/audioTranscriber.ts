@@ -1,14 +1,18 @@
 /**
  * Audio Transcription Service
- * Converts audio files to text using Google Gemini API
- * Supports: webm, ogg, mp3, wav, m4a, flac, aac
- * Languages: Urdu, English, auto-detect
+ * Uses Groq Whisper (whisper-large-v3) — same GROQ_API_KEY already used by llmService.ts
  *
- * Switched from HuggingFace (fal-ai Blob incompatibility) to Gemini Flash
- * which accepts base64-encoded audio inline and already has working API keys.
+ * Why Groq Whisper instead of Gemini:
+ *   - GROQ_API_KEY is already configured and working on Render
+ *   - Whisper-large-v3 supports Urdu (language code "ur") natively
+ *   - Free tier: 7200 audio seconds/hour — more than enough
+ *   - No new API keys or environment variables needed
+ *
+ * Supports: webm, ogg, mp3, wav, m4a, flac, aac (browser default is webm)
  */
 
-import { getAllGeminiApiKeys } from "./utils.js";
+import Groq from "groq-sdk";
+import { getAllGroqApiKeys } from "./utils.js";
 
 export interface TranscriptionResult {
   text: string;
@@ -16,135 +20,91 @@ export interface TranscriptionResult {
   confidence?: number;
 }
 
-const GEMINI_API_ENDPOINT =
-  "https://generativelanguage.googleapis.com/v1beta/models";
-const TRANSCRIPTION_MODEL = "gemini-1.5-flash";
+const WHISPER_MODEL = "whisper-large-v3";
 
 /**
- * Map common audio MIME types to Gemini-supported formats.
- * Gemini supports: audio/wav, audio/mp3, audio/aiff, audio/aac,
- *                  audio/ogg, audio/flac, audio/webm
+ * Map language codes to Whisper-supported ISO 639-1 codes.
+ * Whisper supports Urdu ("ur") natively.
  */
-function normalizeAudioMimeType(mimeType?: string): string {
-  if (!mimeType) return "audio/webm";
+function resolveWhisperLanguage(language?: string | null): string | undefined {
+  if (!language || language === "auto") return undefined; // let Whisper detect
+  if (language === "ur") return "ur";
+  if (language === "en") return "en";
+  return undefined;
+}
+
+/**
+ * Normalize audio MIME type for filename extension mapping.
+ */
+function mimeToExtension(mimeType?: string): string {
+  if (!mimeType) return "webm";
   const lower = mimeType.toLowerCase().split(";")[0].trim();
-  const supported = [
-    "audio/wav",
-    "audio/mp3",
-    "audio/mpeg",
-    "audio/aiff",
-    "audio/aac",
-    "audio/ogg",
-    "audio/flac",
-    "audio/webm",
-  ];
-  if (supported.includes(lower)) return lower;
-  if (lower.includes("webm")) return "audio/webm";
-  if (lower.includes("ogg")) return "audio/ogg";
-  if (lower.includes("mp3") || lower.includes("mpeg")) return "audio/mp3";
-  if (lower.includes("wav")) return "audio/wav";
-  return "audio/webm"; // safest default (what browsers record)
+  if (lower.includes("webm")) return "webm";
+  if (lower.includes("ogg")) return "ogg";
+  if (lower.includes("mp3") || lower.includes("mpeg")) return "mp3";
+  if (lower.includes("wav")) return "wav";
+  if (lower.includes("flac")) return "flac";
+  if (lower.includes("aac")) return "aac";
+  if (lower.includes("m4a") || lower.includes("mp4")) return "m4a";
+  return "webm"; // browser MediaRecorder default
 }
 
 /**
- * Build a language-aware transcription prompt
- */
-function buildTranscriptionPrompt(language?: string | null): string {
-  if (language === "ur") {
-    return (
-      "This audio is in Urdu. Transcribe it exactly into Urdu script. " +
-      "Output only the transcribed text with no extra commentary."
-    );
-  }
-  if (language === "en") {
-    return (
-      "Transcribe this English audio recording exactly. " +
-      "Output only the transcribed text with no extra commentary."
-    );
-  }
-  return (
-    "Transcribe this audio recording exactly. " +
-    "The speaker may use English or Urdu. " +
-    "Output only the transcribed text with no extra commentary."
-  );
-}
-
-/**
- * Transcribe audio using Google Gemini 1.5 Flash.
- * Accepts a Buffer or Uint8Array and optional MIME type.
+ * Transcribe audio using Groq Whisper.
+ * Tries each GROQ_API_KEY with automatic fallback.
+ *
+ * @param audioBuffer  Raw audio data (Buffer or Uint8Array)
+ * @param language     'ur', 'en', null/'auto' for Whisper auto-detect
+ * @param mimeType     Optional MIME type hint (e.g. 'audio/webm')
  */
 export async function transcribeAudio(
   audioBuffer: Buffer | Uint8Array,
   language?: string | null,
   mimeType?: string,
 ): Promise<TranscriptionResult> {
-  const allKeys = getAllGeminiApiKeys();
+  const allKeys = getAllGroqApiKeys();
+
   if (allKeys.length === 0) {
     throw new Error(
-      "No Gemini API keys found — set GEMINI_API_KEY in environment variables",
+      "No Groq API keys found — set GROQ_API_KEY in Render environment variables. " +
+        "This is the same key used for your AI Q&A feature.",
     );
   }
 
-  const resolvedMime = normalizeAudioMimeType(mimeType);
-  const base64Audio = Buffer.isBuffer(audioBuffer)
-    ? audioBuffer.toString("base64")
-    : Buffer.from(audioBuffer).toString("base64");
+  const ext = mimeToExtension(mimeType);
+  const filename = `recording.${ext}`;
+  const whisperLang = resolveWhisperLanguage(language);
 
-  const prompt = buildTranscriptionPrompt(language);
+  // Convert to Buffer if needed
+  const buf = Buffer.isBuffer(audioBuffer)
+    ? audioBuffer
+    : Buffer.from(audioBuffer as Uint8Array);
 
   console.log(
-    `🎤 Transcribing audio via Gemini (${resolvedMime}, ${audioBuffer.length} bytes, lang: ${language || "auto"})...`,
+    `🎤 Groq Whisper (${WHISPER_MODEL}, ${filename}, ${buf.length} bytes, lang: ${whisperLang ?? "auto"})...`,
   );
 
   let lastError: Error | null = null;
 
   for (let i = 0; i < allKeys.length; i++) {
-    const apiKey = allKeys[i];
     const keyLabel = i === 0 ? "Primary" : `Fallback ${i}`;
 
     try {
-      const url = `${GEMINI_API_ENDPOINT}/${TRANSCRIPTION_MODEL}:generateContent?key=${apiKey}`;
+      const groq = new Groq({ apiKey: allKeys[i] });
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: prompt },
-                {
-                  inlineData: {
-                    mimeType: resolvedMime,
-                    data: base64Audio,
-                  },
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0,
-            maxOutputTokens: 2048,
-          },
-        }),
+      // Node.js 18+ has File built-in; Render uses Node 18+
+      const audioFile = new File([buf], filename, {
+        type: mimeType ?? "audio/webm",
       });
 
-      if (!response.ok) {
-        const errData = (await response.json().catch(() => ({}))) as any;
-        const msg = errData.error?.message || `HTTP ${response.status}`;
+      const transcription = await groq.audio.transcriptions.create({
+        file: audioFile,
+        model: WHISPER_MODEL,
+        ...(whisperLang ? { language: whisperLang } : {}),
+        response_format: "json",
+      });
 
-        if (response.status === 429) {
-          throw new Error("Gemini rate limit — try again in a moment");
-        }
-        if (response.status === 401 || response.status === 403) {
-          throw new Error(`Invalid Gemini API key (${keyLabel})`);
-        }
-        throw new Error(msg);
-      }
-
-      const data = (await response.json()) as any;
-      const text =
-        data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+      const text = transcription.text?.trim() ?? "";
 
       if (!text || text.length === 0) {
         throw new Error(
@@ -152,32 +112,37 @@ export async function transcribeAudio(
         );
       }
 
-      console.log(
-        `✅ Transcription complete (${keyLabel}): ${text.length} chars`,
-      );
-
-      // Detect language from script if not provided
+      // Detect script to confirm language
       const detectedLang =
-        language || (/[\u0600-\u06FF]/.test(text) ? "ur" : "en");
+        language && language !== "auto"
+          ? language
+          : /[\u0600-\u06FF]/.test(text)
+            ? "ur"
+            : "en";
+
+      console.log(
+        `✅ Whisper transcription complete (${keyLabel}): ${text.length} chars, lang: ${detectedLang}`,
+      );
 
       return {
         text,
         language: detectedLang,
-        confidence: 0.92,
+        confidence: 0.93,
       };
     } catch (err: any) {
       lastError = err;
-      console.warn(
-        `⚠️ Gemini transcription (${keyLabel}) failed: ${err.message?.slice(0, 80)}`,
-      );
-      if (i < allKeys.length - 1) {
-        console.log("   Trying next API key...");
-      }
+      const msg = err.message?.slice(0, 120) ?? String(err);
+      console.warn(`⚠️ Groq Whisper (${keyLabel}) failed: ${msg}`);
+      if (i < allKeys.length - 1) console.log("   Trying next Groq key...");
     }
   }
 
   throw (
-    lastError || new Error("Audio transcription failed for all Gemini API keys")
+    lastError ??
+    new Error(
+      "Audio transcription failed across all Groq API keys. " +
+        "Check GROQ_API_KEY on Render.",
+    )
   );
 }
 
@@ -194,24 +159,24 @@ export async function transcribeAudioChunks(
     audioChunks.map((chunk) => transcribeAudio(chunk, language)),
   );
 
-  const combinedText = results.map((r) => r.text).join(" ");
-  const detectedLanguage = results[0]?.language || language || "unknown";
-
   return {
-    text: combinedText.trim(),
-    language: detectedLanguage,
-    confidence: 0.92,
+    text: results
+      .map((r) => r.text)
+      .join(" ")
+      .trim(),
+    language: results[0]?.language ?? language ?? "unknown",
+    confidence: 0.93,
   };
 }
 
 /**
- * Detect language of audio by transcribing a small sample.
+ * Detect language from audio by letting Whisper auto-detect.
  */
 export async function detectAudioLanguage(
   audioBuffer: Buffer | Uint8Array,
 ): Promise<string> {
   try {
-    const result = await transcribeAudio(audioBuffer);
+    const result = await transcribeAudio(audioBuffer, null);
     return result.language;
   } catch {
     return "unknown";
@@ -225,6 +190,6 @@ export async function transcribeAudioByLanguage(
   audioBuffer: Buffer | Uint8Array,
   language: "ur" | "en" | "auto" = "auto",
 ): Promise<TranscriptionResult> {
-  const lang = language === "auto" ? undefined : language;
+  const lang = language === "auto" ? null : language;
   return transcribeAudio(audioBuffer, lang);
 }
