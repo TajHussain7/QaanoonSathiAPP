@@ -28,14 +28,14 @@ export interface OCRResult {
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-// Free vision models in priority order.
-// These are verified active on OpenRouter as of May 2025.
+// Free vision models — verified active on OpenRouter as of May 2025.
 // If one hits a rate limit or 404, the next is tried automatically.
+// Source: openrouter.ai/collections/free-models
 const VISION_MODELS = [
-  "google/gemini-2.0-flash-exp:free", // Google Gemini 2.0 Flash — best for Urdu
-  "meta-llama/llama-4-scout:free", // Llama 4 Scout — strong multilingual vision
-  "meta-llama/llama-4-maverick:free", // Llama 4 Maverick — high-quality fallback
-  "microsoft/phi-4-multimodal-instruct:free", // Phi-4 Multimodal — good for documents
+  "nvidia/nemotron-nano-2-vl:free", // Best for OCR, charts, documents (DocVQA leader)
+  "google/gemma-4-31b-it:free", // Gemma 4 31B — text + image, 256K ctx, 140+ languages
+  "google/gemma-4-26b-a4b-it:free", // Gemma 4 MoE — text + image + video, 256K ctx
+  "nvidia/nemotron-3-nano-omni-30b-a3b:free", // Nemotron Omni — text + image + video + audio
 ];
 
 /**
