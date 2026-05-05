@@ -28,11 +28,14 @@ export interface OCRResult {
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-// Free vision models in priority order (first available key wins)
+// Free vision models in priority order.
+// These are verified active on OpenRouter as of May 2025.
+// If one hits a rate limit or 404, the next is tried automatically.
 const VISION_MODELS = [
-  "google/gemini-2.0-flash-exp:free",
-  "meta-llama/llama-4-scout:free",
-  "qwen/qwen2.5-vl-72b-instruct:free",
+  "google/gemini-2.0-flash-exp:free", // Google Gemini 2.0 Flash — best for Urdu
+  "meta-llama/llama-4-scout:free", // Llama 4 Scout — strong multilingual vision
+  "meta-llama/llama-4-maverick:free", // Llama 4 Maverick — high-quality fallback
+  "microsoft/phi-4-multimodal-instruct:free", // Phi-4 Multimodal — good for documents
 ];
 
 /**
@@ -158,13 +161,16 @@ export async function extractTextFromImageHF(
     `📸 OCR via OpenRouter (${mimeType}, ${imageBuffer.length} bytes, lang: ${language})...`,
   );
 
-  let lastError: Error | null = null;
+  // Collect all errors so the final message shows every failure, not just the last
+  const failures: string[] = [];
 
   for (let i = 0; i < VISION_MODELS.length; i++) {
     const model = VISION_MODELS[i];
 
     try {
-      console.log(`   Trying model: ${model}`);
+      console.log(
+        `   Trying model [${i + 1}/${VISION_MODELS.length}]: ${model}`,
+      );
       const text = await callOpenRouterVision(
         apiKey,
         model,
@@ -175,7 +181,7 @@ export async function extractTextFromImageHF(
 
       if (!text || text.length === 0) {
         throw new Error(
-          "No text found in this image. Ensure the image is clear and contains readable text.",
+          "No text found in image — image may be blank or unreadable",
         );
       }
 
@@ -190,21 +196,19 @@ export async function extractTextFromImageHF(
         method: "hf-api",
       };
     } catch (err: any) {
-      lastError = err;
-      const msg = err.message?.slice(0, 120) ?? String(err);
+      const msg = err.message?.slice(0, 150) ?? String(err);
+      failures.push(`[${model}] ${msg}`);
       console.warn(`⚠️ OCR model ${model} failed: ${msg}`);
       if (i < VISION_MODELS.length - 1)
         console.log("   Trying next vision model...");
     }
   }
 
-  throw (
-    lastError ??
-    new Error(
-      "Image text extraction failed for all OpenRouter vision models. " +
-        "Supported formats: JPG, PNG, WebP, GIF. " +
-        "Check OPENROUTER_API_KEY on Render.",
-    )
+  // All models failed — surface all errors in one message for easy debugging
+  throw new Error(
+    "All OpenRouter vision models failed:\n" +
+      failures.map((f, i) => `  ${i + 1}. ${f}`).join("\n") +
+      "\n\nCheck OPENROUTER_API_KEY on Render, or visit openrouter.ai to verify free model availability.",
   );
 }
 
