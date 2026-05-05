@@ -402,7 +402,7 @@ const SearchPage: React.FC<SearchPageProps> = ({
                       ? "گفتگو کی تاریخ"
                       : "Previous Conversations"}
                   </span>
-                  <span className="text-[10px] text-[#065016]/40 font-medium">
+                  <span className="text-[10px] text-[#065016]/65 font-medium">
                     {lang === "ur"
                       ? "کلک کریں لوڈ کرنے کے لیے"
                       : "Click any to reload"}
@@ -437,7 +437,7 @@ const SearchPage: React.FC<SearchPageProps> = ({
                             {item.query}
                           </p>
                           <p
-                            className={`text-[11px] text-[#065016]/40 mt-0.5 line-clamp-1 ${item.resLang === "ur" ? "text-right" : ""}`}
+                            className={`text-[11px] text-[#065016]/65 mt-0.5 line-clamp-1 ${item.resLang === "ur" ? "text-right" : ""}`}
                             dir={item.resLang === "ur" ? "rtl" : "ltr"}
                           >
                             {item.answer?.slice(0, 70)}…
@@ -553,7 +553,7 @@ const SearchPage: React.FC<SearchPageProps> = ({
 
           {/* Character count for Urdu */}
           {isInputUrdu && query.length > 0 && (
-            <div className="px-6 pb-2 text-[10px] text-[#065016]/30 font-medium text-right">
+            <div className="px-6 pb-2 text-[10px] text-[#065016]/60 font-medium text-right">
               {query.length} حروف
             </div>
           )}
@@ -669,7 +669,7 @@ const SearchPage: React.FC<SearchPageProps> = ({
             {sources.length > 0 && (
               <div className="px-8 pb-8 pt-2">
                 <div className="border-t border-[#065016]/5 pt-5">
-                  <p className="text-[10px] font-black text-[#065016]/40 uppercase tracking-[0.3em] mb-3">
+                  <p className="text-[10px] font-black text-[#065016]/70 uppercase tracking-[0.3em] mb-3">
                     {lastResultLang === "ur" ? "ماخذ" : "Sources"}
                   </p>
                   <div

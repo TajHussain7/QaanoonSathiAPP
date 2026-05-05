@@ -6,19 +6,25 @@
     <title>QaanoonSathi | Pakistan Legal Intelligence</title>
     <script>
       // Emergency fix for "fetch has only a getter" error found in some environments
-      (function() {
+      (function () {
         try {
           const originalFetch = window.fetch;
           if (originalFetch) {
             // Check if it's already read-only
-            const desc = Object.getOwnPropertyDescriptor(window, 'fetch');
-            if (desc && desc.get && !desc.set && !desc.writable && desc.configurable) {
+            const desc = Object.getOwnPropertyDescriptor(window, "fetch");
+            if (
+              desc &&
+              desc.get &&
+              !desc.set &&
+              !desc.writable &&
+              desc.configurable
+            ) {
               console.log("🛠️ Repairing window.fetch descriptor...");
-              Object.defineProperty(window, 'fetch', {
+              Object.defineProperty(window, "fetch", {
                 value: originalFetch.bind(window),
                 writable: true,
                 configurable: true,
-                enumerable: true
+                enumerable: true,
               });
             }
           }
@@ -27,10 +33,14 @@
         }
       })();
     </script>
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="shortcut icon" href="/favicon.ico" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

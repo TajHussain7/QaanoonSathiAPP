@@ -300,7 +300,7 @@ const VoiceRecorder: React.FC<{
                 <p className="text-sm font-semibold text-[#065016]/60">
                   Press to start recording your voice query
                 </p>
-                <p className="text-xs text-[#065016]/30 mt-1">
+                <p className="text-xs text-[#065016]/60 mt-1">
                   Supports English and Urdu speech
                 </p>
               </div>
@@ -589,7 +589,7 @@ const MediaUpload: React.FC<{
                         ? "Drop your file here…"
                         : "Drag image or PDF here, or click to browse"}
                     </p>
-                    <p className="text-xs text-[#065016]/30 mt-1">
+                    <p className="text-xs text-[#065016]/60 mt-1">
                       JPG, PNG, WebP, GIF, PDF — up to 25MB
                     </p>
                   </div>
@@ -622,7 +622,7 @@ const MediaUpload: React.FC<{
                     {extractedText.mediaType.toUpperCase()}
                   </span>
                 </div>
-                <p className="text-xs text-[#065016]/40 mb-2">
+                <p className="text-xs text-[#065016]/65 mb-2">
                   {extractedText.fileName} • {extractedText.text.length} chars •{" "}
                   {extractedText.language === "ur" ? "اردو" : "English"}
                 </p>
@@ -810,9 +810,9 @@ const MediaUploadWidget: React.FC<MediaUploadWidgetProps> = ({
               <div className="flex items-start gap-2 mt-4 p-3 bg-[#065016]/[0.03] rounded-lg">
                 <Info
                   size={13}
-                  className="text-[#065016]/30 flex-shrink-0 mt-0.5"
+                  className="text-[#065016]/60 flex-shrink-0 mt-0.5"
                 />
-                <p className="text-[10px] text-[#065016]/30 font-medium leading-relaxed">
+                <p className="text-[10px] text-[#065016]/70 font-medium leading-relaxed">
                   Uploaded files and voice recordings are processed securely and
                   not stored permanently. For best results, use clear images and
                   digital PDFs.
