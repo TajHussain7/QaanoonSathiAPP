@@ -2,45 +2,60 @@
  * Image OCR Service
  * Extracts text from images using OpenRouter vision models (OpenAI-compatible API)
  *
- * Why OpenRouter instead of Gemini:
- *   - Gemini API key currently configured is not a valid Gemini key (starts AQ. not AIza...)
- *   - OpenRouter provides free access to multiple capable vision models
- *   - Automatic fallback across free models if one hits rate limits
+ * REQUIRED — Render environment variable:
+ *   OPENROUTER_API_KEY = your key from openrouter.ai
  *
- * REQUIRED — add to Render environment variables:
- *   OPENROUTER_API_KEY = your OpenRouter API key (from openrouter.ai)
+ * Models used (Google Gemma family — verified valid on OpenRouter May 2025):
+ *   Gemma 4 31B → Gemma 4 26B → Gemma 3 27B → Gemma 3 12B
  *
- * Free vision models used (in priority order):
- *   1. google/gemini-2.0-flash-exp:free  — best for Urdu + English documents
- *   2. meta-llama/llama-4-scout:free     — strong multilingual vision
- *   3. qwen/qwen2.5-vl-72b-instruct:free — good for dense text / mixed scripts
+ * Rate limit handling: waits 3 s between models so consecutive uploads don't
+ * exhaust the per-minute quota immediately.
  *
  * Supports: JPG, PNG, WebP, BMP, GIF
- * Languages: Urdu, English
  */
 
 export interface OCRResult {
   text: string;
   language: string;
   confidence: number;
-  method: "hf-api" | "tesseract"; // preserved for interface compatibility
+  method: "hf-api" | "tesseract";
 }
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-// Free vision models — verified active on OpenRouter as of May 2025.
-// If one hits a rate limit or 404, the next is tried automatically.
-// Source: openrouter.ai/collections/free-models
+// Only Google Gemma models — confirmed valid IDs (no NVIDIA, their free IDs are unstable).
+// Four models give us enough fallback depth for rate-limit situations.
 const VISION_MODELS = [
-  "nvidia/nemotron-nano-2-vl:free", // Best for OCR, charts, documents (DocVQA leader)
-  "google/gemma-4-31b-it:free", // Gemma 4 31B — text + image, 256K ctx, 140+ languages
-  "google/gemma-4-26b-a4b-it:free", // Gemma 4 MoE — text + image + video, 256K ctx
-  "nvidia/nemotron-3-nano-omni-30b-a3b:free", // Nemotron Omni — text + image + video + audio
+  "google/gemma-4-31b-it:free", // Gemma 4 31B — best quality, 256K ctx, 140+ languages
+  "google/gemma-4-26b-a4b-it:free", // Gemma 4 MoE — strong, 256K ctx
+  "google/gemma-3-27b-it:free", // Gemma 3 27B — solid fallback, 131K ctx
+  "google/gemma-3-12b-it:free", // Gemma 3 12B — lightest, least likely rate-limited
 ];
+
+// Delay between model attempts (milliseconds).
+// Prevents exhausting per-minute quota on consecutive uploads.
+const RETRY_DELAY_MS = 3000;
+
+/** Simple sleep helper */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Classify an HTTP error into a user-friendly category.
+ */
+function classifyError(
+  status: number,
+  body: string,
+): "rate_limit" | "invalid" | "other" {
+  if (status === 429) return "rate_limit";
+  if (status === 400 && body.includes("not a valid model")) return "invalid";
+  return "other";
+}
 
 /**
  * Detect image MIME type from magic bytes.
- * Uses Buffer.isBuffer() to avoid TypeScript narrowing-to-never issue.
+ * Uses Buffer.isBuffer() to avoid TypeScript narrowing-to-never bug.
  */
 function detectImageMimeType(buffer: Buffer | Uint8Array): string {
   const b: Buffer = Buffer.isBuffer(buffer)
@@ -76,7 +91,8 @@ function buildOcrPrompt(language: "ur" | "en"): string {
 }
 
 /**
- * Call OpenRouter vision API with a specific model.
+ * Call OpenRouter vision API for one model.
+ * Throws an annotated error with HTTP status embedded for classifyError().
  */
 async function callOpenRouterVision(
   apiKey: string,
@@ -102,9 +118,7 @@ async function callOpenRouterVision(
             { type: "text", text: prompt },
             {
               type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${base64Image}`,
-              },
+              image_url: { url: `data:${mimeType};base64,${base64Image}` },
             },
           ],
         },
@@ -115,9 +129,11 @@ async function callOpenRouterVision(
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(
-      `OpenRouter ${model} returned HTTP ${response.status}: ${body.slice(0, 200)}`,
-    );
+    // Embed status in message so classifyError() can parse it
+    const err = new Error(`HTTP_${response.status}:${body.slice(0, 300)}`);
+    (err as any).status = response.status;
+    (err as any).body = body;
+    throw err;
   }
 
   const data = (await response.json()) as {
@@ -126,16 +142,16 @@ async function callOpenRouterVision(
   };
 
   if (data.error?.message) {
-    throw new Error(`OpenRouter error: ${data.error.message}`);
+    throw new Error(`API_ERROR:${data.error.message}`);
   }
 
-  const text = data.choices?.[0]?.message?.content?.trim() ?? "";
-  return text;
+  return data.choices?.[0]?.message?.content?.trim() ?? "";
 }
 
 /**
  * Extract text from image using OpenRouter vision models.
- * Tries each free model in order; falls back if one hits rate limits.
+ * Tries each model in order; on rate-limit (429) waits before next attempt.
+ * Throws a user-friendly (non-technical) error if all models fail.
  */
 export async function extractTextFromImageHF(
   imageBuffer: Buffer | Uint8Array,
@@ -145,8 +161,7 @@ export async function extractTextFromImageHF(
 
   if (!apiKey) {
     throw new Error(
-      "OPENROUTER_API_KEY is not set. " +
-        "Go to Render → Environment and add OPENROUTER_API_KEY with your key from openrouter.ai",
+      "Image reading is not configured. Please contact the administrator to set up the OPENROUTER_API_KEY.",
     );
   }
 
@@ -161,11 +176,18 @@ export async function extractTextFromImageHF(
     `📸 OCR via OpenRouter (${mimeType}, ${imageBuffer.length} bytes, lang: ${language})...`,
   );
 
-  // Collect all errors so the final message shows every failure, not just the last
-  const failures: string[] = [];
+  let rateLimitCount = 0;
+  const technicalLog: string[] = []; // kept for server logs only, never shown to user
 
   for (let i = 0; i < VISION_MODELS.length; i++) {
     const model = VISION_MODELS[i];
+
+    // Wait before each attempt after the first — prevents rate-limit cascade
+    // on consecutive uploads within the same minute
+    if (i > 0) {
+      console.log(`   Waiting ${RETRY_DELAY_MS / 1000}s before next model...`);
+      await sleep(RETRY_DELAY_MS);
+    }
 
     try {
       console.log(
@@ -180,35 +202,59 @@ export async function extractTextFromImageHF(
       );
 
       if (!text || text.length === 0) {
-        throw new Error(
-          "No text found in image — image may be blank or unreadable",
-        );
+        throw new Error("EMPTY_RESULT");
       }
 
-      console.log(
-        `✅ OCR complete (${model}): ${text.length} chars, format: ${mimeType}`,
-      );
-
-      return {
-        text,
-        language,
-        confidence: 0.92,
-        method: "hf-api",
-      };
+      console.log(`✅ OCR complete (${model}): ${text.length} chars`);
+      return { text, language, confidence: 0.92, method: "hf-api" };
     } catch (err: any) {
-      const msg = err.message?.slice(0, 150) ?? String(err);
-      failures.push(`[${model}] ${msg}`);
-      console.warn(`⚠️ OCR model ${model} failed: ${msg}`);
-      if (i < VISION_MODELS.length - 1)
-        console.log("   Trying next vision model...");
+      const raw = err.message ?? String(err);
+      const status: number = err.status ?? 0;
+      const body: string = err.body ?? raw;
+      const kind = classifyError(status, body);
+
+      technicalLog.push(
+        `[${model}] HTTP ${status || "ERR"}: ${raw.slice(0, 100)}`,
+      );
+      console.warn(`⚠️ OCR [${model}] failed (${kind}): ${raw.slice(0, 100)}`);
+
+      if (kind === "rate_limit") rateLimitCount++;
+
+      // Skip invalid model IDs immediately — no point retrying
+      if (kind === "invalid") {
+        console.warn(
+          `   Skipping ${model} — model ID not recognised by OpenRouter`,
+        );
+      }
     }
   }
 
-  // All models failed — surface all errors in one message for easy debugging
+  // ── All models failed — return a plain-language message to the user ──────────
+
+  // Log the full technical details server-side for debugging
+  console.error(
+    "❌ All OCR models failed.\n" +
+      technicalLog.map((l, i) => `  ${i + 1}. ${l}`).join("\n"),
+  );
+
+  // User-facing message — no HTTP codes, no model IDs, no jargon
+  if (rateLimitCount === VISION_MODELS.length) {
+    throw new Error(
+      "The image reading service is busy right now. " +
+        "Please wait about 30 seconds and upload the image again.",
+    );
+  }
+
+  if (rateLimitCount > 0) {
+    throw new Error(
+      "Image processing is temporarily busy. " +
+        "Please wait a moment and try uploading again.",
+    );
+  }
+
   throw new Error(
-    "All OpenRouter vision models failed:\n" +
-      failures.map((f, i) => `  ${i + 1}. ${f}`).join("\n") +
-      "\n\nCheck OPENROUTER_API_KEY on Render, or visit openrouter.ai to verify free model availability.",
+    "We were unable to read text from this image. " +
+      "Please make sure it is a clear JPG, PNG, or WebP image and try again.",
   );
 }
 
@@ -234,7 +280,8 @@ export async function extractTextFromImageStrict(
   const result = await extractTextFromImage(imageBuffer, language);
   if (result.confidence < minConfidence) {
     throw new Error(
-      `OCR confidence too low (${result.confidence.toFixed(2)} < ${minConfidence}). Document quality may be poor.`,
+      "The image quality is too low to read reliably. " +
+        "Please try a sharper, higher-resolution image.",
     );
   }
   return result;
@@ -249,12 +296,12 @@ export async function extractTextFromImages(
 ): Promise<OCRResult> {
   console.log(`📸 Batch OCR: processing ${imageBuffers.length} images...`);
 
-  const results = await Promise.all(
-    imageBuffers.map((buf, idx) => {
-      console.log(`   [${idx + 1}/${imageBuffers.length}]`);
-      return extractTextFromImage(buf, language);
-    }),
-  );
+  const results: OCRResult[] = [];
+  for (let idx = 0; idx < imageBuffers.length; idx++) {
+    console.log(`   [${idx + 1}/${imageBuffers.length}]`);
+    // Sequential processing with built-in delay avoids rate limits in batch
+    results.push(await extractTextFromImage(imageBuffers[idx], language));
+  }
 
   const combinedText = results
     .map((r) => r.text)
