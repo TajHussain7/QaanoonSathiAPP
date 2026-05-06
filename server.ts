@@ -487,6 +487,70 @@ async function startServer() {
     }
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NEW ROUTE: Document Analysis — Add this block to server.ts
+  // Place it BEFORE the existing `app.post("/api/query", ...)` route
+  // (i.e., right after the /api/process-media route block)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.post("/api/analyze-document", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          error: "No file provided",
+          message: "Please upload a PDF, DOC, or DOCX file.",
+        });
+      }
+
+      const lang = (req.body.lang as string) || "en";
+
+      // Validate MIME type
+      const allowed = [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+      ];
+
+      if (!allowed.includes(req.file.mimetype)) {
+        return res.status(400).json({
+          error: "Unsupported file type",
+          message: `"${req.file.mimetype}" is not supported. Please upload a PDF, DOC, or DOCX file.`,
+        });
+      }
+
+      // File size check (20 MB)
+      if (req.file.size > 20 * 1024 * 1024) {
+        return res.status(400).json({
+          error: "File too large",
+          message: "Maximum file size is 20 MB.",
+        });
+      }
+
+      const { analyzeDocument } = await import(
+        resolveModule("src/services/backend/documentAnalyzer.js")
+      );
+
+      const result = await analyzeDocument(
+        req.file.buffer,
+        req.file.mimetype,
+        lang,
+      );
+
+      console.log(
+        `✅ Document analysis endpoint: analysis complete for ${req.file.originalname}`,
+      );
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Document analysis error:", error.message);
+      res.status(500).json({
+        error: error.message || "Document analysis failed",
+        message:
+          "An error occurred while analysing your document. Please ensure the file is a valid, readable PDF, DOC, or DOCX.",
+      });
+    }
+  });
+
   // legacy RAG Query Route (kept for compatibility during migration)
   app.post("/api/query", async (req, res) => {
     const { query, category, lang } = req.body;

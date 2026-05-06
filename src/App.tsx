@@ -7,6 +7,7 @@ import Emergency from "./components/Emergency";
 import Auth from "./components/Auth";
 import Dashboard from "./components/Dashboard";
 import { apiCall } from "./services/apiClient";
+import DocumentAnalysis from "./components/DocumentAnalysis";
 
 /**
  * App Component
@@ -159,6 +160,10 @@ function App() {
         {currentPage === "license" && <License lang={lang} />}
 
         {currentPage === "emergency" && <Emergency lang={lang} t={t} />}
+
+        {currentPage === "document-analysis" && (
+          <DocumentAnalysis lang={lang} />
+        )}
       </main>
     </div>
   );

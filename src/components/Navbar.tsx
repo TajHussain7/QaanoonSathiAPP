@@ -105,6 +105,16 @@ const Navbar: React.FC<NavbarProps> = ({
           >
             {t.emergency}
           </button>
+
+          <button
+            onClick={() => {
+              setCurrentPage("document-analysis");
+              closeSidebar();
+            }}
+            className={mobileLinkClass}
+          >
+            {lang === "ur" ? "دستاویز تجزیہ" : "Analyse Document"}
+          </button>
         </nav>
 
         {/* Bottom actions */}
@@ -223,6 +233,14 @@ const Navbar: React.FC<NavbarProps> = ({
               className={linkClass}
             >
               {t.emergency} <div className={underline} />
+            </button>
+
+            <button
+              onClick={() => setCurrentPage("document-analysis")}
+              className={linkClass}
+            >
+              {lang === "ur" ? "دستاویز" : "Analyse Doc"}{" "}
+              <div className={underline} />
             </button>
           </div>
 
