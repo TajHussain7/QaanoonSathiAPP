@@ -215,7 +215,7 @@ const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Desktop Navigation */}
-          <div className="hidden lg:flex items-center gap-14 flex-[2] justify-center">
+          <div className="hidden lg:flex items-center gap-20 flex-[2] justify-center">
             <button
               onClick={() => setCurrentPage("search")}
               className={linkClass}
