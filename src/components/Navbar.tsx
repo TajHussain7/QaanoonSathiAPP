@@ -34,7 +34,10 @@ const Navbar: React.FC<NavbarProps> = ({
   const navLinks = [
     { label: lang === "ur" ? "ہوم" : "Home", page: "home" },
     { label: lang === "ur" ? "تلاش" : "Search", page: "search" },
-    { label: lang === "ur" ? "دستاویز" : "Analyze Doc", page: "search" },
+    {
+      label: lang === "ur" ? "دستاویز" : "Analyze Doc",
+      page: "document-analysis",
+    },
     { label: t.emergency, page: "emergency" },
     { label: t.license, page: "license" },
   ];
