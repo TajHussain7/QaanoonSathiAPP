@@ -730,6 +730,158 @@ async function startServer() {
     }
   });
 
+  // ── NEW: Document Analysis Endpoint ────────────────────────────────────────
+  app.post("/api/analyze-document", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          error: "No file provided",
+          message: "Please upload a legal document (PDF, DOC, DOCX)",
+        });
+      }
+
+      const lang = req.body.lang || "en";
+      const supportedTypes = [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+      ];
+
+      if (!supportedTypes.includes(req.file.mimetype)) {
+        return res.status(400).json({
+          error: "Unsupported file type",
+          message: "Please upload a PDF or Word document",
+        });
+      }
+
+      // Step 1: Extract text from document
+      const { extractTextFromMedia } = await import(
+        resolveModule("src/services/backend/mediaExtractor.js")
+      );
+
+      const extractionResult = await extractTextFromMedia(
+        req.file.buffer,
+        req.file.mimetype,
+        lang,
+      );
+
+      if (extractionResult.error || !extractionResult.text) {
+        return res.status(400).json({
+          error: "Failed to extract text",
+          message: "Could not read the document. Please try another file.",
+        });
+      }
+
+      // Step 2: Analyze document using LLM
+      const documentText = extractionResult.text.slice(0, 4000); // Limit to first 4000 chars
+      const isUrdu = lang === "ur";
+
+      const analysisPrompt = isUrdu
+        ? `پاکستانی قانون کے تحت یہ قانونی دستاویز تجزیہ کریں۔ JSON میں جواب دیں (کوئی markdown نہیں)۔ ہر فیلڈ میں صرف اردو میں جواب دیں۔
+
+دستاویز:
+${documentText}
+
+یہ JSON structure بنائیں:
+{
+  "caseSummary": "کیس کا ایک لائن میں خلاصہ",
+  "simplifiedExplanation": "عام لوگوں کے لیے سادہ وضاحت",
+  "caseDetails": {
+    "type": "کیس کی قسم (FIR/عدالتی فیصلہ/وغیرہ)",
+    "court": "متعلقہ عدالت",
+    "punishment": "ممکنہ سزا",
+    "legalSection": "متعلقہ قانونی دفعات",
+    "confidenceScore": 75,
+    "applicableLaws": ["قانون 1", "قانون 2"],
+    "timeline": [{"date": "تاریخ", "event": "واقعہ"}],
+    "estimatedYears": "متوقع مدت"
+  },
+  "comprehensiveAnalysis": {
+    "finalAnalysis": "تفصیلی تجزیہ",
+    "firNumber": "FIR نمبر اگر موجود ہو",
+    "whatHappened": "کیا ہوا",
+    "steps": ["قدم 1", "قدم 2"],
+    "whatItMatters": "اہمیت",
+    "pakistaniCourts": "عدالتی نظام میں حیثیت",
+    "evolution": "قانون کی تطور",
+    "note": "اہم نوٹ"
+  },
+  "urduExplanation": "مکمل اردو میں وضاحت"
+}`
+        : `Analyze this legal document under Pakistani law. Respond ONLY with valid JSON (no markdown, no code blocks, no explanations).
+
+Document:
+${documentText}
+
+Generate this JSON structure with all fields in English:
+{
+  "caseSummary": "One-line case summary",
+  "simplifiedExplanation": "Explanation for non-lawyers",
+  "caseDetails": {
+    "type": "Case type (FIR/Court Order/etc)",
+    "court": "Relevant court",
+    "punishment": "Possible punishment/penalty",
+    "legalSection": "Applicable legal sections",
+    "confidenceScore": 75,
+    "applicableLaws": ["Law 1", "Law 2"],
+    "timeline": [{"date": "YYYY-MM-DD", "event": "What happened"}],
+    "estimatedYears": "Estimated duration"
+  },
+  "comprehensiveAnalysis": {
+    "finalAnalysis": "Detailed legal analysis",
+    "firNumber": "FIR number if applicable",
+    "whatHappened": "Summary of events",
+    "steps": ["Step 1 in legal process", "Step 2"],
+    "whatItMatters": "Why this matters",
+    "pakistaniCourts": "Position in Pakistani judicial system",
+    "evolution": "How law has evolved",
+    "note": "Important note"
+  },
+  "urduExplanation": "Full explanation in Urdu script"
+}`;
+
+      const analysisContent = await callGroqDirect(
+        [
+          {
+            role: "system",
+            content:
+              "You are an expert Pakistani legal analyst. Analyze documents and provide structured insights in valid JSON format. Never include markdown formatting or code blocks.",
+          },
+          { role: "user", content: analysisPrompt },
+        ],
+        3000,
+      );
+
+      // Parse JSON response
+      let analysis;
+      try {
+        // Remove markdown code blocks if present
+        let cleanedContent = analysisContent
+          .replace(/```json\n?/g, "")
+          .replace(/```\n?/g, "");
+        analysis = JSON.parse(cleanedContent);
+      } catch (parseError) {
+        console.error("Failed to parse analysis JSON:", parseError);
+        return res.status(500).json({
+          error: "Analysis parsing failed",
+          message: "Could not parse document analysis response",
+        });
+      }
+
+      console.log(
+        `✅ Analyze-document endpoint: Document analyzed successfully`,
+      );
+
+      res.json(analysis);
+    } catch (error: any) {
+      console.error("Document analysis error:", error);
+      res.status(500).json({
+        error: error.message || "Document analysis failed",
+        message: "An error occurred while analyzing your document",
+      });
+    }
+  });
+
   const isProd = process.env.NODE_ENV === "production";
 
   // Vite integration
