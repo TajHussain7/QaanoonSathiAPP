@@ -14,10 +14,22 @@ import {
   Keyboard,
   X,
   Clock,
+  Volume2,
+  VolumeX,
+  Share2,
+  ThumbsUp,
+  ThumbsDown,
+  FileText,
+  MapPin,
+  Brain,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import SourceModal from "./SourceModal";
 import MediaUploadWidget from "./MediaUploadWidget";
+import FollowUpSuggestions from "./FollowUpSuggestions";
+import LegalGlossaryBadges from "./LegalGlossaryBadges";
+import ChecklistModal from "./ChecklistModal";
+import TrendingPanel from "./TrendingPanel";
 
 interface Result {
   answer: string;
@@ -31,6 +43,12 @@ interface HistoryItem {
   answer: string;
   resLang: string;
   pinned?: boolean;
+}
+
+interface ConversationTurn {
+  query: string;
+  answer: string;
+  lang: string;
 }
 
 interface SearchPageProps {
@@ -124,6 +142,16 @@ const parseAnswer = (
   return { mainText: answer, disclaimer: null };
 };
 
+// Province / Jurisdiction options
+const JURISDICTIONS = [
+  { value: "all", label: "All Pakistan", labelUr: "تمام پاکستان" },
+  { value: "federal", label: "Federal", labelUr: "وفاقی" },
+  { value: "punjab", label: "Punjab", labelUr: "پنجاب" },
+  { value: "sindh", label: "Sindh", labelUr: "سندھ" },
+  { value: "kpk", label: "KPK", labelUr: "خیبر پختونخوا" },
+  { value: "balochistan", label: "Balochistan", labelUr: "بلوچستان" },
+];
+
 const SearchPage: React.FC<SearchPageProps> = ({
   t,
   lang,
@@ -131,6 +159,7 @@ const SearchPage: React.FC<SearchPageProps> = ({
   userName,
   token,
 }) => {
+  // ── Core state ────────────────────────────────────────────────────────────
   const [query, setQuery] = useState("");
   const [answer, setAnswer] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -164,10 +193,30 @@ const SearchPage: React.FC<SearchPageProps> = ({
   ]);
   const [showHistory, setShowHistory] = useState(false);
   const [showUrduKeyboard, setShowUrduKeyboard] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
+  // ── New feature state ──────────────────────────────────────────────────────
+  const [jurisdiction, setJurisdiction] = useState("all");
+  const [conversationHistory, setConversationHistory] = useState<
+    ConversationTurn[]
+  >([]);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [feedbackGiven, setFeedbackGiven] = useState<"up" | "down" | null>(
+    null,
+  );
+  const [showChecklist, setShowChecklist] = useState(false);
+  const [lastQuery, setLastQuery] = useState("");
+
+  const inputRef = useRef<HTMLInputElement>(null);
   const isInputUrdu = containsUrdu(query);
 
+  // Cancel TTS when component unmounts
+  useEffect(() => {
+    return () => {
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+    };
+  }, []);
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
   const handleSearch = async (customQuery: string | null = null) => {
     const rawQuery = typeof customQuery === "string" ? customQuery : query;
     if (!rawQuery.trim()) return;
@@ -175,14 +224,20 @@ const SearchPage: React.FC<SearchPageProps> = ({
     setIsLoading(true);
     setAnswer("");
     setSources([]);
+    setFeedbackGiven(null);
     setStatusMessage("Authenticating & processing...");
     setShowUrduKeyboard(false);
 
+    // Stop any ongoing TTS
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    setIsSpeaking(false);
+
     try {
       const isUrduInput = containsUrdu(rawQuery);
-      // If input has no Urdu script, always respond in English/Roman — regardless of UI lang
+      // If input has no Urdu script, always respond in English/Roman
       const targetLang = isUrduInput ? "ur" : "en";
       setLastResultLang(targetLang);
+      setLastQuery(rawQuery);
 
       const headers: any = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -194,6 +249,8 @@ const SearchPage: React.FC<SearchPageProps> = ({
           query: rawQuery,
           category: detectedCategory,
           lang: targetLang,
+          jurisdiction,
+          conversationHistory: conversationHistory.slice(-3),
         }),
       });
 
@@ -203,6 +260,13 @@ const SearchPage: React.FC<SearchPageProps> = ({
 
       setAnswer(data.answer);
       setSources(data.sources || []);
+
+      // Update conversation memory (keep last 5 turns)
+      setConversationHistory((prev) => [
+        ...prev.slice(-4),
+        { query: rawQuery, answer: data.answer, lang: targetLang },
+      ]);
+
       setHistory((prev) => [
         {
           id: Date.now(),
@@ -226,6 +290,105 @@ const SearchPage: React.FC<SearchPageProps> = ({
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2000);
     });
+  };
+
+  const handleTextToSpeech = () => {
+    if (!window.speechSynthesis) return;
+
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+
+    const text = mainText.replace(/[#*_`>]/g, "").trim();
+    if (!text) return;
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 0.9;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+
+    // Wait for voices to load (some browsers need this)
+    const speak = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (lastResultLang === "ur") {
+        const urduVoice = voices.find(
+          (v) => v.lang.startsWith("ur") || v.lang.includes("PK"),
+        );
+        if (urduVoice) utterance.voice = urduVoice;
+        utterance.lang = "ur-PK";
+      } else {
+        const englishVoice = voices.find((v) => v.lang.startsWith("en"));
+        if (englishVoice) utterance.voice = englishVoice;
+        utterance.lang = "en-US";
+      }
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
+      setIsSpeaking(true);
+      window.speechSynthesis.speak(utterance);
+    };
+
+    if (window.speechSynthesis.getVoices().length === 0) {
+      window.speechSynthesis.onvoiceschanged = () => {
+        speak();
+        window.speechSynthesis.onvoiceschanged = null;
+      };
+    } else {
+      speak();
+    }
+  };
+
+  const handleWhatsAppShare = () => {
+    const questionLabel = lastResultLang === "ur" ? "سوال" : "Question";
+    const answerLabel = lastResultLang === "ur" ? "جواب" : "Answer";
+    const truncated =
+      mainText.length > 600 ? mainText.slice(0, 600) + "..." : mainText;
+    const footer =
+      lastResultLang === "ur"
+        ? "QaanoonSathi — پاکستانی قانون کا مددگار"
+        : "QaanoonSathi — Pakistan Legal AI";
+
+    const text = `*${questionLabel}:*\n${query}\n\n*${answerLabel}:*\n${truncated}\n\n_${footer}_`;
+    window.open(
+      `https://wa.me/?text=${encodeURIComponent(text)}`,
+      "_blank",
+      "noopener",
+    );
+  };
+
+  const handleShareLink = () => {
+    const url = `${window.location.origin}${window.location.pathname}?q=${encodeURIComponent(query)}`;
+    navigator.clipboard.writeText(url).then(() => {
+      alert(lang === "ur" ? "لنک کاپی ہو گیا!" : "Link copied to clipboard!");
+    });
+  };
+
+  const handleFeedback = async (rating: "up" | "down") => {
+    if (feedbackGiven) return;
+    setFeedbackGiven(rating);
+    try {
+      const headers: any = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      await apiCall("/api/feedback", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          query,
+          answer: answer.slice(0, 1000),
+          rating: rating === "up" ? 1 : -1,
+          lang: lastResultLang,
+        }),
+      });
+    } catch {
+      // Non-critical — fail silently
+    }
+  };
+
+  const handleSelectFollowUp = (q: string) => {
+    setQuery(q);
+    handleSearch(q);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const deleteHistoryItem = (id: number) => {
@@ -486,8 +649,35 @@ const SearchPage: React.FC<SearchPageProps> = ({
         />
       </div>
 
-      {/* Main Search Input */}
-      <div className="relative group mb-8">
+      {/* ── Jurisdiction / Province Filter ───────────────────────────────── */}
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-2.5">
+          <MapPin size={12} className="text-[#065016]/50" />
+          <span className="text-[10px] font-black text-[#065016]/60 uppercase tracking-[0.25em]">
+            {lang === "ur" ? "صوبہ / دائرہ اختیار" : "Province / Jurisdiction"}
+          </span>
+        </div>
+        <div
+          className={`flex flex-wrap gap-2 ${lang === "ur" ? "flex-row-reverse" : ""}`}
+        >
+          {JURISDICTIONS.map((j) => (
+            <button
+              key={j.value}
+              onClick={() => setJurisdiction(j.value)}
+              className={`px-3.5 py-1.5 text-[11px] font-bold rounded-full border transition-all ${
+                jurisdiction === j.value
+                  ? "bg-[#065016] text-white border-[#065016] shadow-sm"
+                  : "bg-white text-[#065016]/60 border-[#065016]/15 hover:border-[#065016]/40 hover:text-[#065016]"
+              }`}
+            >
+              {lang === "ur" ? j.labelUr : j.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Main Search Input ─────────────────────────────────────────────── */}
+      <div className="relative group mb-2">
         <div className="absolute -inset-1 bg-gradient-to-r from-[#065016]/20 to-[#065016]/20 rounded-[2.5rem] blur-xl opacity-0 group-focus-within:opacity-100 transition duration-700" />
         <div className="relative bg-white border border-[#065016]/20 rounded-[2rem] overflow-visible shadow-xl transition-all duration-500 group-focus-within:border-[#065016]/50">
           {/* Top bar */}
@@ -499,7 +689,7 @@ const SearchPage: React.FC<SearchPageProps> = ({
               </span>
             </div>
             <div className="ml-auto flex items-center gap-2">
-              {/* Urdu keyboard toggle (show when Urdu lang or Urdu text detected) */}
+              {/* Urdu keyboard toggle */}
               {(lang === "ur" || isInputUrdu) && (
                 <button
                   type="button"
@@ -573,7 +763,41 @@ const SearchPage: React.FC<SearchPageProps> = ({
         </AnimatePresence>
       </div>
 
-      {/* Loading indicator */}
+      {/* ── Conversation Memory Indicator ────────────────────────────────── */}
+      {conversationHistory.length > 0 && (
+        <div className="mb-6 flex items-center gap-2 px-1">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#065016]/5 rounded-full">
+            <Brain size={11} className="text-[#065016]/60" />
+            <span className="text-[10px] font-bold text-[#065016]/60">
+              {lang === "ur"
+                ? `گفتگو یاد ہے: ${conversationHistory.length} موڑ`
+                : `Memory active: ${conversationHistory.length} turn${conversationHistory.length > 1 ? "s" : ""}`}
+            </span>
+          </div>
+          <button
+            onClick={() => setConversationHistory([])}
+            className="text-[10px] font-bold text-[#065016]/40 hover:text-red-500 transition-colors"
+            title="Clear conversation memory"
+          >
+            {lang === "ur" ? "صاف کریں" : "Clear"}
+          </button>
+        </div>
+      )}
+
+      {/* ── Trending Questions (shown only when no answer yet) ────────────── */}
+      {!answer && !isLoading && (
+        <div className="mb-4">
+          <TrendingPanel
+            lang={lang}
+            onSelectQuestion={(q) => {
+              setQuery(q);
+              handleSearch(q);
+            }}
+          />
+        </div>
+      )}
+
+      {/* ── Loading Indicator ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {isLoading && (
           <motion.div
@@ -594,7 +818,7 @@ const SearchPage: React.FC<SearchPageProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Answer Board */}
+      {/* ── Answer Board ──────────────────────────────────────────────────── */}
       <div className="min-h-[200px]">
         {answer && !isLoading && (
           <motion.div
@@ -615,24 +839,61 @@ const SearchPage: React.FC<SearchPageProps> = ({
                   </span>
                   <p className="text-[9px] text-[#065016]/40 font-medium uppercase tracking-wide mt-0.5">
                     {lastResultLang === "ur" ? "اردو" : "QaanoonSathi AI"}
+                    {jurisdiction !== "all" && (
+                      <span className="ml-2 text-[#A68A56]">
+                        ·{" "}
+                        {
+                          JURISDICTIONS.find((j) => j.value === jurisdiction)?.[
+                            lang === "ur" ? "labelUr" : "label"
+                          ]
+                        }
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
-              <button
-                onClick={handleCopy}
-                className="p-2.5 bg-[#FDFBF7] border border-[#065016]/15 rounded-xl text-[#065016]/50 hover:bg-[#065016] hover:text-white hover:border-[#065016] transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
-                title="Copy answer"
-              >
-                {isCopied ? (
-                  <>
-                    <Check size={14} /> Copied
-                  </>
-                ) : (
-                  <>
-                    <Copy size={14} /> Copy
-                  </>
-                )}
-              </button>
+
+              {/* Action buttons */}
+              <div className="flex items-center gap-2">
+                {/* Text-to-Speech */}
+                <button
+                  onClick={handleTextToSpeech}
+                  title={isSpeaking ? "Stop reading" : "Read aloud"}
+                  className={`p-2.5 rounded-xl transition-all ${
+                    isSpeaking
+                      ? "bg-[#065016] text-white"
+                      : "bg-[#FDFBF7] border border-[#065016]/15 text-[#065016]/50 hover:bg-[#065016]/10 hover:text-[#065016]"
+                  }`}
+                >
+                  {isSpeaking ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                </button>
+
+                {/* WhatsApp Share */}
+                <button
+                  onClick={handleWhatsAppShare}
+                  title="Share on WhatsApp"
+                  className="p-2.5 bg-[#FDFBF7] border border-[#065016]/15 rounded-xl text-[#065016]/50 hover:bg-green-500 hover:text-white hover:border-green-500 transition-all"
+                >
+                  <Share2 size={14} />
+                </button>
+
+                {/* Copy answer */}
+                <button
+                  onClick={handleCopy}
+                  className="p-2.5 bg-[#FDFBF7] border border-[#065016]/15 rounded-xl text-[#065016]/50 hover:bg-[#065016] hover:text-white hover:border-[#065016] transition-all flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                  title="Copy answer"
+                >
+                  {isCopied ? (
+                    <>
+                      <Check size={14} /> Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={14} /> Copy
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Main answer content */}
@@ -653,7 +914,7 @@ const SearchPage: React.FC<SearchPageProps> = ({
               </div>
             </div>
 
-            {/* Disclaimer block — separated and highlighted */}
+            {/* Disclaimer block */}
             {disclaimer && (
               <div className="mx-8 mb-6 px-5 py-4 bg-[#A68A56]/8 border border-[#A68A56]/25 rounded-xl">
                 <div className="flex items-start gap-3">
@@ -665,9 +926,15 @@ const SearchPage: React.FC<SearchPageProps> = ({
               </div>
             )}
 
+            {/* ── Legal Glossary Badges ── */}
+            <LegalGlossaryBadges
+              text={mainText}
+              lang={lastResultLang || lang}
+            />
+
             {/* Sources section */}
             {sources.length > 0 && (
-              <div className="px-8 pb-8 pt-2">
+              <div className="px-8 pb-4 pt-2">
                 <div className="border-t border-[#065016]/5 pt-5">
                   <p className="text-[10px] font-black text-[#065016]/70 uppercase tracking-[0.3em] mb-3">
                     {lastResultLang === "ur" ? "ماخذ" : "Sources"}
@@ -690,10 +957,87 @@ const SearchPage: React.FC<SearchPageProps> = ({
                 </div>
               </div>
             )}
+
+            {/* ── Follow-up Suggestions ── */}
+            <FollowUpSuggestions
+              query={lastQuery}
+              answer={mainText}
+              lang={lastResultLang || lang}
+              token={token}
+              onSelectQuestion={handleSelectFollowUp}
+            />
+
+            {/* ── Feedback + Checklist row ── */}
+            <div className="px-8 pb-7 flex items-center justify-between flex-wrap gap-3">
+              {/* Feedback */}
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-black text-[#065016]/50 uppercase tracking-widest">
+                  {lastResultLang === "ur"
+                    ? "کیا جواب مددگار تھا؟"
+                    : "Was this helpful?"}
+                </span>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => handleFeedback("up")}
+                    disabled={!!feedbackGiven}
+                    className={`p-2 rounded-xl border transition-all ${
+                      feedbackGiven === "up"
+                        ? "bg-green-500 text-white border-green-500"
+                        : feedbackGiven
+                          ? "opacity-30 cursor-default bg-[#FDFBF7] border-[#065016]/15 text-[#065016]/40"
+                          : "bg-[#FDFBF7] border-[#065016]/15 text-[#065016]/40 hover:bg-green-50 hover:text-green-600 hover:border-green-300"
+                    }`}
+                    title="Helpful"
+                  >
+                    <ThumbsUp size={14} />
+                  </button>
+                  <button
+                    onClick={() => handleFeedback("down")}
+                    disabled={!!feedbackGiven}
+                    className={`p-2 rounded-xl border transition-all ${
+                      feedbackGiven === "down"
+                        ? "bg-red-500 text-white border-red-500"
+                        : feedbackGiven
+                          ? "opacity-30 cursor-default bg-[#FDFBF7] border-[#065016]/15 text-[#065016]/40"
+                          : "bg-[#FDFBF7] border-[#065016]/15 text-[#065016]/40 hover:bg-red-50 hover:text-red-500 hover:border-red-300"
+                    }`}
+                    title="Not helpful"
+                  >
+                    <ThumbsDown size={14} />
+                  </button>
+                  {feedbackGiven && (
+                    <span className="text-[10px] font-bold text-[#065016]/50 self-center ml-1">
+                      {lastResultLang === "ur" ? "شکریہ!" : "Thanks!"}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Document Checklist button */}
+              <button
+                onClick={() => setShowChecklist(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-[#FDFBF7] border border-[#065016]/15 rounded-xl text-[11px] font-bold text-[#065016]/60 hover:bg-[#065016] hover:text-white hover:border-[#065016] transition-all"
+              >
+                <FileText size={13} />
+                {lastResultLang === "ur"
+                  ? "دستاویز چیک لسٹ"
+                  : "Document Checklist"}
+              </button>
+            </div>
           </motion.div>
         )}
       </div>
 
+      {/* ── Checklist Modal ───────────────────────────────────────────────── */}
+      {showChecklist && (
+        <ChecklistModal
+          lang={lang}
+          token={token}
+          onClose={() => setShowChecklist(false)}
+        />
+      )}
+
+      {/* ── Source Modal ──────────────────────────────────────────────────── */}
       <SourceModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}

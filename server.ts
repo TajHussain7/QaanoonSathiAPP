@@ -69,6 +69,40 @@ const resolveModule = (modulePath: string): string => {
   return new URL(`file://${absolutePath.replace(/\\/g, "/")}`).href;
 };
 
+// ── In-memory trending counter (resets on restart, no DB required) ──────────
+const trendingCounter: Record<
+  string,
+  { count: number; category: string; lang: string; query: string }
+> = {};
+
+// ── Groq direct helper (used by /api/followup and /api/checklist) ────────────
+const callGroqDirect = async (
+  messages: Array<{ role: string; content: string }>,
+  maxTokens = 400,
+): Promise<string> => {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) return "";
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages,
+        temperature: 0.5,
+        max_tokens: maxTokens,
+      }),
+    });
+    const data: any = await res.json();
+    return data.choices?.[0]?.message?.content || "";
+  } catch {
+    return "";
+  }
+};
+
 async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || "3000", 10);
@@ -487,73 +521,10 @@ async function startServer() {
     }
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // NEW ROUTE: Document Analysis — Add this block to server.ts
-  // Place it BEFORE the existing `app.post("/api/query", ...)` route
-  // (i.e., right after the /api/process-media route block)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  app.post("/api/analyze-document", upload.single("file"), async (req, res) => {
-    try {
-      if (!req.file) {
-        return res.status(400).json({
-          error: "No file provided",
-          message: "Please upload a PDF, DOC, or DOCX file.",
-        });
-      }
-
-      const lang = (req.body.lang as string) || "en";
-
-      // Validate MIME type
-      const allowed = [
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/msword",
-      ];
-
-      if (!allowed.includes(req.file.mimetype)) {
-        return res.status(400).json({
-          error: "Unsupported file type",
-          message: `"${req.file.mimetype}" is not supported. Please upload a PDF, DOC, or DOCX file.`,
-        });
-      }
-
-      // File size check (20 MB)
-      if (req.file.size > 20 * 1024 * 1024) {
-        return res.status(400).json({
-          error: "File too large",
-          message: "Maximum file size is 20 MB.",
-        });
-      }
-
-      const { analyzeDocument } = await import(
-        resolveModule("src/services/backend/documentAnalyzer.js")
-      );
-
-      const result = await analyzeDocument(
-        req.file.buffer,
-        req.file.mimetype,
-        lang,
-      );
-
-      console.log(
-        `✅ Document analysis endpoint: analysis complete for ${req.file.originalname}`,
-      );
-
-      res.json(result);
-    } catch (error: any) {
-      console.error("Document analysis error:", error.message);
-      res.status(500).json({
-        error: error.message || "Document analysis failed",
-        message:
-          "An error occurred while analysing your document. Please ensure the file is a valid, readable PDF, DOC, or DOCX.",
-      });
-    }
-  });
-
-  // legacy RAG Query Route (kept for compatibility during migration)
+  // RAG Query Route
   app.post("/api/query", async (req, res) => {
-    const { query, category, lang } = req.body;
+    const { query, category, lang, conversationHistory, jurisdiction } =
+      req.body;
 
     if (!query) {
       return res.status(400).json({ error: "Query is required" });
@@ -573,14 +544,189 @@ async function startServer() {
         }
       }
 
+      // Build context-aware query (multi-turn memory + jurisdiction)
+      let fullQuery = query;
+
+      if (
+        Array.isArray(conversationHistory) &&
+        conversationHistory.length > 0
+      ) {
+        const contextLines = conversationHistory
+          .slice(-3)
+          .map(
+            (h: any) =>
+              `Q: ${String(h.query).slice(0, 150)}\nA: ${String(h.answer).slice(0, 200)}`,
+          )
+          .join("\n\n");
+        fullQuery = `Previous context:\n${contextLines}\n\nCurrent question: ${query}`;
+      }
+
+      if (jurisdiction && jurisdiction !== "all") {
+        const provinceMap: Record<string, string> = {
+          federal: "Federal (Islamabad)",
+          punjab: "Punjab",
+          sindh: "Sindh",
+          kpk: "Khyber Pakhtunkhwa (KPK)",
+          balochistan: "Balochistan",
+        };
+        fullQuery += ` (Jurisdiction: ${provinceMap[jurisdiction] || jurisdiction}, Pakistan)`;
+      }
+
+      // Update in-memory trending counter
+      const trendingKey = String(query).trim().toLowerCase().slice(0, 120);
+      if (trendingCounter[trendingKey]) {
+        trendingCounter[trendingKey].count++;
+      } else {
+        trendingCounter[trendingKey] = {
+          count: 1,
+          category: category || "General",
+          lang: lang || "en",
+          query: String(query).trim(),
+        };
+      }
+
       const { performRagQuery } = await import(
         resolveModule("src/services/backend/ragEngine.js")
       );
-      const result = await performRagQuery(query, category, lang, userId);
+      const result = await performRagQuery(fullQuery, category, lang, userId);
       res.json(result);
     } catch (error: any) {
       console.error("Error processing query:", error);
       res.status(500).json({ error: error.message || "Internal server error" });
+    }
+  });
+
+  // ── NEW: Generate follow-up questions ──────────────────────────────────────
+  app.post("/api/followup", async (req, res) => {
+    const { query, answer, lang } = req.body;
+    if (!query || !answer) {
+      return res.status(400).json({ error: "query and answer are required" });
+    }
+
+    try {
+      const isUrdu = lang === "ur";
+      const prompt = isUrdu
+        ? `ایک قانونی سوال اور اس کا جواب دیا گیا ہے۔ اس سے متعلق بالکل 3 مختصر فالو-اپ سوالات لکھیں جو اگلے مرحلے میں مفید ہوں۔ صرف سوالات لکھیں، ایک لائن میں ہر سوال، کوئی numbering نہیں۔\n\nسوال: ${query}\nجواب: ${String(answer).slice(0, 400)}`
+        : `Given this Pakistani legal Q&A, generate exactly 3 concise follow-up questions a user might ask next. Return only the questions, one per line, no numbering, no prefixes, no extra text.\n\nQuestion: ${query}\nAnswer: ${String(answer).slice(0, 400)}`;
+
+      const content = await callGroqDirect(
+        [
+          {
+            role: "system",
+            content:
+              "You are a Pakistani legal assistant. Generate concise, practical follow-up questions.",
+          },
+          { role: "user", content: prompt },
+        ],
+        250,
+      );
+
+      const questions = content
+        .split("\n")
+        .map((q: string) => q.replace(/^[-•*\d.]+\s*/, "").trim())
+        .filter((q: string) => q.length > 8 && q.length < 220)
+        .slice(0, 3);
+
+      res.json({ questions });
+    } catch (error: any) {
+      console.error("Followup generation error:", error.message);
+      res.status(500).json({ error: "Failed to generate follow-up questions" });
+    }
+  });
+
+  // ── NEW: Store answer feedback ─────────────────────────────────────────────
+  app.post("/api/feedback", async (req, res) => {
+    const { query, answer, rating, lang } = req.body;
+    if (!query || typeof rating !== "number") {
+      return res
+        .status(400)
+        .json({ error: "query and numeric rating are required" });
+    }
+
+    try {
+      const { supabase } = await import(
+        resolveModule("src/services/backend/supabaseClient.js")
+      );
+
+      // Optional user ID
+      let userId: string | null = null;
+      const token = req.headers.authorization?.split(" ")[1];
+      if (token && token !== "null") {
+        const { data: userData } = await supabase.auth.getUser(token);
+        userId = userData?.user?.id || null;
+      }
+
+      const { error } = await supabase.from("feedback").insert({
+        query: String(query).slice(0, 500),
+        answer: answer ? String(answer).slice(0, 1000) : null,
+        rating,
+        lang: lang || "en",
+        user_id: userId,
+      });
+
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (error: any) {
+      // Non-critical — still return 200 so frontend doesn't show an error
+      console.error("Feedback store error:", error.message);
+      res.json({ success: false, message: "Feedback noted locally" });
+    }
+  });
+
+  // ── NEW: Trending questions (in-memory) ────────────────────────────────────
+  app.get("/api/trending", (req, res) => {
+    const topQueries = Object.entries(trendingCounter)
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 10)
+      .map(([_, data]) => ({
+        query: data.query,
+        count: data.count,
+        category: data.category,
+        lang: data.lang,
+      }));
+    res.json({ trending: topQueries });
+  });
+
+  // ── NEW: Legal document checklist generator ────────────────────────────────
+  app.post("/api/checklist", async (req, res) => {
+    const { documentType, lang } = req.body;
+    if (!documentType) {
+      return res.status(400).json({ error: "documentType is required" });
+    }
+
+    try {
+      const isUrdu = lang === "ur";
+      const prompt = isUrdu
+        ? `پاکستانی قانون کے مطابق "${documentType}" کے لیے مرحلہ وار مکمل چیک لسٹ بنائیں۔ ہر آئٹم ایک نئی لائن پر لکھیں، - سے شروع کریں۔ 8 سے 12 آئٹم لکھیں۔ مختصر، واضح اور عملی۔`
+        : `Generate a practical step-by-step checklist for "${documentType}" under Pakistani law. List 8–12 items, one per line, each starting with "- ". Be specific and concise. No intro text, no conclusion.`;
+
+      const content = await callGroqDirect(
+        [
+          {
+            role: "system",
+            content:
+              "You are an expert Pakistani lawyer. Generate accurate, practical legal checklists.",
+          },
+          { role: "user", content: prompt },
+        ],
+        700,
+      );
+
+      const items = content
+        .split("\n")
+        .map((line: string) =>
+          line
+            .replace(/^[-•*]\s*/, "")
+            .replace(/^\d+[.)]\s*/, "")
+            .trim(),
+        )
+        .filter((line: string) => line.length > 5)
+        .slice(0, 12);
+
+      res.json({ items, documentType });
+    } catch (error: any) {
+      console.error("Checklist generation error:", error.message);
+      res.status(500).json({ error: "Failed to generate checklist" });
     }
   });
 
