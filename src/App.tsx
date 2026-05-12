@@ -126,6 +126,7 @@ function App() {
               setSearchCategory(cat);
               setCurrentPage("search");
             }}
+            setCurrentPage={setCurrentPage}
           />
         )}
 

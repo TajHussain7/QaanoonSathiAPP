@@ -1,5 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import ReactDOM from "react-dom";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  Scale,
+  X,
+  ChevronRight,
+  LayoutDashboard,
+  LogOut,
+  User,
+} from "lucide-react";
 
 interface NavbarProps {
   lang: string;
@@ -19,146 +28,123 @@ const Navbar: React.FC<NavbarProps> = ({
   onLogout,
 }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
 
-  const linkClass = `relative font-black uppercase transition-all duration-300 hover:text-[#A68A56] text-[#065016] py-1 group whitespace-nowrap 
-    ${lang === "ur" ? "text-2xl font-urdu tracking-normal" : "text-[14px] tracking-[0.25em]"}`;
-
-  const mobileLinkClass = `w-full text-left font-black uppercase py-5 border-b border-[#065016]/10 
-    ${lang === "ur" ? "text-3xl font-urdu text-right text-[#065016]" : "text-lg tracking-widest text-[#065016]"}`;
-
-  const underline =
-    "absolute bottom-0 left-0 w-0 h-[2.5px] bg-[#A68A56] transition-all duration-300 group-hover:w-full";
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   const closeSidebar = () => setIsSidebarOpen(false);
 
-  // Render the mobile sidebar via portal to escape all stacking contexts
+  const navLinks = [
+    { label: lang === "ur" ? "تلاش" : "Search", page: "search" },
+    { label: t.emergency, page: "emergency" },
+    { label: t.license, page: "license" },
+  ];
+
+  // ── Mobile sidebar via portal ──────────────────────────────────────────────
   const sidebar = ReactDOM.createPortal(
     <>
-      {/* Backdrop overlay */}
-      <div
-        className={`fixed inset-0 bg-[#065016]/30 backdrop-blur-sm transition-all duration-500 z-[200] ${
-          isSidebarOpen
-            ? "opacity-100 pointer-events-auto"
-            : "opacity-0 pointer-events-none"
-        }`}
-        onClick={closeSidebar}
-      />
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="fixed inset-0 bg-[#065016]/25 backdrop-blur-sm z-[200]"
+            onClick={closeSidebar}
+          />
+        )}
+      </AnimatePresence>
 
-      {/* Sidebar panel */}
-      <div
-        className={`fixed right-0 top-0 h-full w-[80%] max-w-sm bg-[#FDFBF7] shadow-2xl transition-transform duration-500 ease-out flex flex-col z-[201] ${
-          isSidebarOpen ? "translate-x-0" : "translate-x-full"
-        }`}
+      <motion.div
+        initial={false}
+        animate={{ x: isSidebarOpen ? 0 : "100%" }}
+        transition={{ type: "spring", stiffness: 320, damping: 35 }}
+        className="fixed right-0 top-0 h-full w-[82%] max-w-[340px] bg-[#FDFBF7] shadow-2xl flex flex-col z-[201]"
         dir={lang === "ur" ? "rtl" : "ltr"}
       >
-        {/* Sidebar close button (top) */}
-        <div className="flex justify-between items-center px-8 pt-6 pb-2">
-          <div
-            className="flex items-center gap-3 cursor-pointer"
+        {/* Sidebar header */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-[#065016]/8">
+          <button
             onClick={() => {
               setCurrentPage("home");
               closeSidebar();
             }}
+            className="flex items-center gap-3"
           >
-            <div className="w-8 h-8 bg-[#065016] flex items-center justify-center">
-              <span className="text-[#FDFBF7] font-bold text-base">Q</span>
+            <div className="w-8 h-8 bg-[#065016] flex items-center justify-center rotate-45 flex-shrink-0">
+              <Scale size={14} className="text-[#FDFBF7] -rotate-45" />
             </div>
-            <span className="text-sm font-black text-[#065016] uppercase tracking-tight">
+            <span
+              className={`font-black text-[#065016] text-base tracking-tight ${lang === "ur" ? "font-urdu" : ""}`}
+            >
               {t.nav}
             </span>
-          </div>
+          </button>
           <button
             onClick={closeSidebar}
-            className="w-9 h-9 flex flex-col items-center justify-center gap-1.5 transition-all"
+            className="w-9 h-9 flex items-center justify-center text-[#065016]/40 hover:text-[#065016] hover:bg-[#065016]/5 rounded-xl transition-colors"
           >
-            <div className="w-6 h-0.5 bg-[#065016] rotate-45 translate-y-[3px]" />
-            <div className="w-6 h-0.5 bg-[#065016] -rotate-45 -translate-y-[3px]" />
+            <X size={20} />
           </button>
         </div>
 
-        {/* Navigation links */}
-        <nav className="flex flex-col px-8 pt-6 flex-1">
-          <button
-            onClick={() => {
-              setCurrentPage("search");
-              closeSidebar();
-            }}
-            className={mobileLinkClass}
-          >
-            {lang === "ur" ? "تلاش" : "Search"}
-          </button>
-          <button
-            onClick={() => {
-              setCurrentPage("license");
-              closeSidebar();
-            }}
-            className={mobileLinkClass}
-          >
-            {t.license}
-          </button>
-          <button
-            onClick={() => {
-              setCurrentPage("emergency");
-              closeSidebar();
-            }}
-            className={mobileLinkClass}
-          >
-            {t.emergency}
-          </button>
-
-          <button
-            onClick={() => {
-              setCurrentPage("document-analysis");
-              closeSidebar();
-            }}
-            className={mobileLinkClass}
-          >
-            {lang === "ur" ? "دستاویز تجزیہ" : "Analyse Document"}
-          </button>
+        {/* Nav links */}
+        <nav className="flex-1 px-4 py-4 overflow-y-auto">
+          {navLinks.map((link) => (
+            <button
+              key={link.page}
+              onClick={() => {
+                setCurrentPage(link.page);
+                closeSidebar();
+              }}
+              className={`w-full flex items-center justify-between px-4 py-4 rounded-xl mb-1 hover:bg-[#065016]/5 transition-colors group ${lang === "ur" ? "flex-row-reverse font-urdu text-xl text-right" : "font-black text-sm tracking-widest uppercase"} text-[#065016]`}
+            >
+              {link.label}
+              <ChevronRight
+                size={16}
+                className={`text-[#065016]/20 group-hover:text-[#065016]/50 transition-colors ${lang === "ur" ? "rotate-180" : ""}`}
+              />
+            </button>
+          ))}
         </nav>
 
         {/* Bottom actions */}
-        <div className="px-8 pb-10 space-y-4">
-          {/* Language Toggle */}
-          <div className="flex bg-[#065016]/5 rounded-2xl p-1.5 border border-[#065016]/20">
-            <button
-              onClick={() => {
-                setLang("en");
-                closeSidebar();
-              }}
-              className={`flex-1 py-3 rounded-xl font-black text-sm transition-all ${
-                lang === "en"
-                  ? "bg-[#065016] text-white shadow-md"
-                  : "text-[#065016]"
-              }`}
-            >
-              EN
-            </button>
-            <button
-              onClick={() => {
-                setLang("ur");
-                closeSidebar();
-              }}
-              className={`flex-1 py-3 rounded-xl font-urdu text-xl font-black transition-all ${
-                lang === "ur"
-                  ? "bg-[#065016] text-white shadow-md"
-                  : "text-[#065016]"
-              }`}
-            >
-              اردو
-            </button>
+        <div className="px-4 pb-8 space-y-3 border-t border-[#065016]/8 pt-4">
+          {/* Language toggle */}
+          <div className="flex bg-[#065016]/6 rounded-xl p-1 gap-1">
+            {[
+              { code: "en", label: "English", short: "EN" },
+              { code: "ur", label: "اردو", short: "اردو" },
+            ].map((l) => (
+              <button
+                key={l.code}
+                onClick={() => {
+                  setLang(l.code);
+                  closeSidebar();
+                }}
+                className={`flex-1 py-2.5 rounded-lg font-black text-sm transition-all ${l.code === "ur" ? "font-urdu text-lg" : "tracking-widest"} ${lang === l.code ? "bg-[#065016] text-white shadow-sm" : "text-[#065016]/60 hover:text-[#065016]"}`}
+              >
+                {l.short}
+              </button>
+            ))}
           </div>
 
-          {/* Auth buttons */}
+          {/* Auth */}
           {user ? (
-            <div className="flex flex-col gap-3">
+            <div className="space-y-2">
               <button
                 onClick={() => {
                   setCurrentPage("dashboard");
                   closeSidebar();
                 }}
-                className="w-full py-4 bg-white text-[#065016] border-2 border-[#065016]/10 rounded-2xl font-black tracking-widest uppercase text-sm"
+                className="w-full flex items-center gap-3 px-4 py-3.5 bg-white border border-[#065016]/10 rounded-xl font-bold text-[#065016] text-sm hover:border-[#065016]/30 transition-colors"
               >
+                <LayoutDashboard size={16} className="text-[#065016]/50" />
                 {lang === "ur" ? "ڈیش بورڈ" : "Dashboard"}
               </button>
               <button
@@ -166,8 +152,9 @@ const Navbar: React.FC<NavbarProps> = ({
                   onLogout();
                   closeSidebar();
                 }}
-                className="w-full py-4 bg-[#065016] text-white rounded-2xl font-black tracking-widest uppercase text-sm"
+                className="w-full flex items-center gap-3 px-4 py-3.5 bg-[#065016] text-white rounded-xl font-bold text-sm"
               >
+                <LogOut size={16} />
                 {t.logout}
               </button>
             </div>
@@ -177,153 +164,181 @@ const Navbar: React.FC<NavbarProps> = ({
                 setCurrentPage("auth");
                 closeSidebar();
               }}
-              className="w-full py-4 bg-[#065016] text-white rounded-2xl font-black tracking-widest uppercase text-sm"
+              className="w-full py-3.5 bg-[#065016] text-white rounded-xl font-black tracking-widest uppercase text-sm"
             >
-              Access System
+              {lang === "ur" ? "داخل ہوں" : "Access System"}
             </button>
           )}
         </div>
-      </div>
+      </motion.div>
     </>,
     document.body,
   );
 
   return (
     <div className="sticky top-0 z-50">
-      {/* Main Navbar — no sidebar inside here anymore */}
-      <nav className="bg-[#FDFBF7]/95 backdrop-blur-2xl border-b border-[#065016]/10">
+      <nav
+        className={`bg-[#FDFBF7]/96 backdrop-blur-2xl transition-shadow duration-300 ${
+          scrolled ? "shadow-[0_2px_24px_rgba(6,80,22,0.08)]" : ""
+        }`}
+      >
+        {/* Main bar */}
         <div
-          className="max-w-[1440px] mx-auto px-6 lg:px-10 h-20 lg:h-24 flex justify-between items-center"
+          className="relative max-w-[1440px] mx-auto px-5 lg:px-10 h-[60px] lg:h-[68px] flex items-center justify-between"
           dir="ltr"
         >
-          {/* Brand */}
-          <div
-            className="flex items-center gap-4 cursor-pointer group z-50"
-            onClick={() => {
-              setCurrentPage("home");
-              closeSidebar();
-            }}
+          {/* ── Brand (left) ─────────────────────────────────────────── */}
+          <motion.button
+            onClick={() => setCurrentPage("home")}
+            className="flex items-center gap-3 flex-shrink-0 group"
+            initial={{ opacity: 0, x: -12 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.4 }}
           >
-            <div className="w-10 h-10 lg:w-11 lg:h-11 bg-[#065016] flex items-center justify-center rotate-45 group-hover:rotate-0 transition-all duration-500 shadow-[6px_6px_0px_0px_rgba(166,138,86,0.2)]">
-              <span className="text-[#FDFBF7] -rotate-45 group-hover:rotate-0 transition-all font-bold text-xl">
-                Q
-              </span>
+            <div className="w-9 h-9 bg-[#065016] flex items-center justify-center rotate-45 group-hover:rotate-0 transition-all duration-500 shadow-[4px_4px_0px_rgba(166,138,86,0.25)] flex-shrink-0">
+              <Scale
+                size={15}
+                className="text-[#FDFBF7] -rotate-45 group-hover:rotate-0 transition-all duration-500"
+              />
             </div>
-            <h1 className="text-xl lg:text-2xl font-black tracking-tighter text-[#065016] hidden sm:block uppercase">
+            <span
+              className={`font-black text-[#065016] whitespace-nowrap tracking-tight leading-none hidden sm:block ${
+                lang === "ur" ? "font-urdu text-xl" : "text-[17px] uppercase"
+              }`}
+            >
               {t.nav}
-            </h1>
-          </div>
+            </span>
+          </motion.button>
 
-          {/* Desktop Navigation */}
-          <div className="hidden lg:flex items-center gap-20 flex-[2] justify-center">
-            <button
-              onClick={() => setCurrentPage("search")}
-              className={linkClass}
-            >
-              {lang === "ur" ? "تلاش" : "Search"} <div className={underline} />
-            </button>
-            <button
-              onClick={() => setCurrentPage("license")}
-              className={linkClass}
-            >
-              {t.license} <div className={underline} />
-            </button>
-            <button
-              onClick={() => setCurrentPage("emergency")}
-              className={linkClass}
-            >
-              {t.emergency} <div className={underline} />
-            </button>
-
-            <button
-              onClick={() => setCurrentPage("document-analysis")}
-              className={linkClass}
-            >
-              {lang === "ur" ? "دستاویز" : "Analyse Doc"}{" "}
-              <div className={underline} />
-            </button>
-          </div>
-
-          {/* Auth & Language */}
-          <div className="flex items-center gap-4 lg:gap-8 flex-1 justify-end">
-            {/* Language toggle */}
-            <div className="hidden sm:flex items-center bg-[#065016]/10 rounded-full p-1 border border-[#065016]/30">
+          {/* ── Desktop Nav (absolute center) ──────────────────────────── */}
+          <motion.div
+            className="hidden lg:flex items-center gap-1 absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+          >
+            {navLinks.map((link) => (
               <button
-                onClick={() => setLang("en")}
-                className={`px-3 py-1 text-[10px] font-black rounded-full transition-all ${
-                  lang === "en"
-                    ? "bg-[#065016] text-white shadow-sm"
-                    : "text-[#065016]/60"
-                }`}
-              >
-                EN
-              </button>
-              <button
-                onClick={() => setLang("ur")}
-                className={`px-4 py-1 text-lg font-black rounded-full transition-all font-urdu ${
+                key={link.page}
+                onClick={() => setCurrentPage(link.page)}
+                className={`relative px-4 py-2 group transition-colors hover:text-[#065016] text-[#065016]/60 ${
                   lang === "ur"
-                    ? "bg-[#065016] text-white shadow-sm"
-                    : "text-[#065016]/60"
+                    ? "font-urdu text-xl font-black"
+                    : "font-black text-[11px] tracking-[0.22em] uppercase"
                 }`}
               >
-                اردو
+                {link.label}
+                <motion.div
+                  className="absolute bottom-0 left-1/2 -translate-x-1/2 h-[2px] bg-[#A68A56] rounded-full"
+                  initial={{ width: 0 }}
+                  whileHover={{ width: "60%" }}
+                  transition={{ duration: 0.2 }}
+                />
               </button>
+            ))}
+          </motion.div>
+
+          {/* ── Right: Language + Auth + Hamburger ──────────────────────── */}
+          <motion.div
+            className="flex items-center gap-2 lg:gap-3 flex-shrink-0"
+            initial={{ opacity: 0, x: 12 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.4 }}
+          >
+            {/* Language pill */}
+            <div className="hidden sm:flex items-center gap-0.5 bg-[#065016]/7 rounded-full p-1 border border-[#065016]/12">
+              {[
+                { code: "en", label: "EN" },
+                { code: "ur", label: "اردو" },
+              ].map((l) => (
+                <button
+                  key={l.code}
+                  onClick={() => setLang(l.code)}
+                  className={`px-3 py-1 rounded-full font-black transition-all ${
+                    l.code === "ur"
+                      ? "font-urdu text-[15px]"
+                      : "text-[10px] tracking-widest"
+                  } ${lang === l.code ? "bg-[#065016] text-white shadow-sm" : "text-[#065016]/50 hover:text-[#065016]"}`}
+                >
+                  {l.label}
+                </button>
+              ))}
             </div>
 
-            {/* Desktop auth */}
+            {/* Divider */}
+            <div className="hidden lg:block w-[1px] h-5 bg-[#065016]/10" />
+
+            {/* Auth — desktop */}
             {user ? (
-              <div className="hidden lg:flex items-center gap-4 animate-in">
+              <div className="hidden lg:flex items-center gap-2">
                 <button
                   onClick={() => setCurrentPage("dashboard")}
-                  className="font-black uppercase text-[#065016] relative group text-xs tracking-widest"
+                  className="flex items-center gap-2 px-3 py-2 text-[#065016] rounded-lg hover:bg-[#065016]/5 transition-colors group"
                 >
-                  {user?.user_metadata?.full_name || "Account"}
-                  <div className="absolute -bottom-1 left-0 w-full h-[2px] bg-[#A68A56] scale-x-0 group-hover:scale-x-100 transition-transform origin-left" />
+                  <div className="w-7 h-7 bg-[#065016]/10 rounded-lg flex items-center justify-center">
+                    <User size={13} className="text-[#065016]" />
+                  </div>
+                  <span className="font-black text-[11px] uppercase tracking-widest text-[#065016] max-w-[100px] truncate">
+                    {user?.user_metadata?.full_name || "Account"}
+                  </span>
                 </button>
-                <div className="h-4 w-[1px] bg-[#065016]/10" />
                 <button
                   onClick={onLogout}
-                  className="text-[#065016] font-black uppercase text-[10px] tracking-widest hover:text-[#065016]/70 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-2 text-[#065016]/50 hover:text-[#065016] text-[10px] font-black uppercase tracking-widest rounded-lg hover:bg-[#065016]/5 transition-colors"
                 >
+                  <LogOut size={13} />
                   {t.logout}
                 </button>
               </div>
             ) : (
-              <button
+              <motion.button
                 onClick={() => setCurrentPage("auth")}
-                className="hidden lg:block bg-[#065016] text-[#FDFBF7] hover:bg-[#065016]/90 transition-all rounded-xl font-black uppercase tracking-widest text-[10px] px-8 py-3.5 shadow-lg active:scale-95"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                className="hidden lg:flex items-center gap-2 bg-[#065016] text-[#FDFBF7] rounded-xl font-black uppercase tracking-widest text-[10px] px-6 py-2.5 shadow-md hover:bg-[#065016]/90 transition-colors"
               >
-                Access System
-              </button>
+                {lang === "ur" ? "داخل ہوں" : "Access System"}
+              </motion.button>
             )}
 
-            {/* Hamburger button */}
+            {/* Hamburger — mobile/tablet only */}
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="lg:hidden w-10 h-10 flex flex-col items-center justify-center gap-1.5 transition-all active:scale-90"
+              className="lg:hidden w-9 h-9 flex flex-col items-center justify-center gap-[5px] rounded-lg hover:bg-[#065016]/5 transition-colors"
               aria-label="Toggle menu"
             >
-              <div
-                className={`w-6 h-0.5 bg-[#065016] transition-all duration-300 ${
-                  isSidebarOpen ? "rotate-45 translate-y-2" : ""
-                }`}
+              <motion.div
+                animate={{
+                  rotate: isSidebarOpen ? 45 : 0,
+                  y: isSidebarOpen ? 7 : 0,
+                }}
+                transition={{ duration: 0.25 }}
+                className="w-5 h-[1.5px] bg-[#065016] origin-center"
               />
-              <div
-                className={`w-6 h-0.5 bg-[#065016] transition-all duration-200 ${
-                  isSidebarOpen ? "opacity-0" : ""
-                }`}
+              <motion.div
+                animate={{
+                  opacity: isSidebarOpen ? 0 : 1,
+                  scaleX: isSidebarOpen ? 0 : 1,
+                }}
+                transition={{ duration: 0.2 }}
+                className="w-5 h-[1.5px] bg-[#065016]"
               />
-              <div
-                className={`w-6 h-0.5 bg-[#065016] transition-all duration-300 ${
-                  isSidebarOpen ? "-rotate-45 -translate-y-2" : ""
-                }`}
+              <motion.div
+                animate={{
+                  rotate: isSidebarOpen ? -45 : 0,
+                  y: isSidebarOpen ? -7 : 0,
+                }}
+                transition={{ duration: 0.25 }}
+                className="w-5 h-[1.5px] bg-[#065016] origin-center"
               />
             </button>
-          </div>
+          </motion.div>
         </div>
+
+        {/* Gold accent line */}
+        <div className="h-[1.5px] bg-gradient-to-r from-transparent via-[#A68A56]/35 to-transparent" />
       </nav>
 
-      {/* Sidebar rendered via portal to document.body — escapes all stacking contexts */}
       {sidebar}
     </div>
   );
